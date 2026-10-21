@@ -251,24 +251,21 @@
                     localStorage.setItem('ncn_inv_cache', JSON.stringify(branchInventories));
                 }
 
-                // ดึงประวัติจาก Supabase ตาราง draw_records (ถ้ามี) ถ้าไม่มีให้ใช้จาก localStorage
+                // ดึงประวัติจาก Supabase ตาราง draw_records
                 let { data: recData } = await supabaseClient.from('draw_records').select('*');
                 if (recData && recData.length > 0) {
+                    customers = {};
                     recData.forEach(r => {
                         let phone = r.phone;
                         if (!customers[phone]) {
                             customers[phone] = { name: r.name, drawsCount: 0, history: [] };
                         }
-                        // ป้องกันประวัติซ้ำ
-                        let exists = customers[phone].history.some(h => h.time === r.time && h.rewardName === r.reward_name);
-                        if (!exists) {
-                            customers[phone].drawsCount += 1;
-                            customers[phone].history.push({
-                                rewardName: r.reward_name,
-                                branchName: r.branch_name,
-                                time: r.time
-                            });
-                        }
+                        customers[phone].drawsCount += 1;
+                        customers[phone].history.push({
+                            rewardName: r.reward_name,
+                            branchName: r.branch_name,
+                            time: r.time
+                        });
                     });
                     localStorage.setItem('ncn_customers', JSON.stringify(customers));
                 }
@@ -456,7 +453,7 @@
         function attachHomeEvents() {
             const form = document.getElementById('customer-form');
             if (!form) return;
-            form.addEventListener('submit', (e) => {
+            form.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 playSound('click');
                 const name = document.getElementById('cust-name').value.trim();
@@ -469,8 +466,18 @@
                 }
 
                 customerData = { name, phone };
-                let custRecord = customers[phone];
-                let drawsCount = custRecord ? custRecord.drawsCount : 0;
+
+                // เช็คสิทธิ์จากตาราง draw_records บน Supabase โดยตรง
+                let drawsCount = 0;
+                if (supabaseClient) {
+                    try {
+                        let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
+                        if (data) drawsCount = data.length;
+                    } catch (e) {}
+                }
+                if (drawsCount === 0 && customers[phone]) {
+                    drawsCount = customers[phone].drawsCount;
+                }
 
                 if (drawsCount >= 2) {
                     showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'หมายเลขโทรศัพท์นี้ใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว (รวมทุกสาขา)<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ!');
@@ -525,8 +532,18 @@
         async function openBox(boxNum) {
             playSound('magic');
             
-            let custRecord = customers[customerData.phone] || { name: customerData.name, drawsCount: 0, history: [] };
-            if (custRecord.drawsCount >= 2) {
+            let drawsCount = 0;
+            if (supabaseClient) {
+                try {
+                    let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', customerData.phone);
+                    if (data) drawsCount = data.length;
+                } catch (e) {}
+            }
+            if (drawsCount === 0 && customers[customerData.phone]) {
+                drawsCount = customers[customerData.phone].drawsCount;
+            }
+
+            if (drawsCount >= 2) {
                 showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup', () => {
                     goToHome();
                 });
@@ -570,39 +587,38 @@
             branchInventories[selectedBranch][wonReward.id].stock -= 1;
             await saveRewardToSupabase(wonReward.id);
 
-            custRecord.name = customerData.name;
-            custRecord.drawsCount += 1;
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
-            const isImg = typeof wonReward.image === 'string' && wonReward.image.startsWith('data:image');
-            const recordEntry = {
-                id: 'DR-' + Date.now(),
-                branchName: branchObj.name,
-                rewardName: wonReward.name,
-                rewardImage: isImg ? '🎁' : wonReward.image,
-                time: new Date().toLocaleString('th-TH')
-            };
-            custRecord.history = custRecord.history || [];
-            custRecord.history.push(recordEntry);
-            customers[customerData.phone] = custRecord;
-            localStorage.setItem('ncn_customers', JSON.stringify(customers));
+            const timeStr = new Date().toLocaleString('th-TH');
 
-            // บันทึกลง Supabase ตาราง draw_records ด้วย
+            // บันทึกลงตาราง draw_records ใน Supabase ตรงตามคอลัมน์ของคุณ
             if (supabaseClient) {
                 try {
                     await supabaseClient.from('draw_records').insert({
                         phone: customerData.phone,
                         name: customerData.name,
+                        branch_id: selectedBranch,
                         branch_name: branchObj.name,
                         reward_name: wonReward.name,
-                        time: recordEntry.time
+                        time: timeStr
                     });
                 } catch (e) {}
             }
 
+            if (!customers[customerData.phone]) {
+                customers[customerData.phone] = { name: customerData.name, drawsCount: 0, history: [] };
+            }
+            customers[customerData.phone].drawsCount += 1;
+            customers[customerData.phone].history.push({
+                rewardName: wonReward.name,
+                branchName: branchObj.name,
+                time: timeStr
+            });
+            localStorage.setItem('ncn_customers', JSON.stringify(customers));
+
             setTimeout(() => {
                 document.getElementById('magic-modal')?.remove();
                 playSound('win');
-                showWinPopup(wonReward, custRecord.drawsCount);
+                showWinPopup(wonReward, customers[customerData.phone].drawsCount);
             }, 2000);
         }
 
@@ -754,7 +770,7 @@
                         </div>
                     </div>
 
-                    <!-- แท็บเมนูสลับหน้า (จัดการสต็อก / ประวัติลูกค้าและสิทธิ์) -->
+                    <!-- แท็บเมนูสลับหน้า -->
                     <div class="flex space-x-2 mb-6 border-b border-purple-800/40 pb-4">
                         <button onclick="setAdminTab('stock')" class="px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${adminTab === 'stock' ? 'bg-orange-600 text-white glow-orange' : 'bg-purple-950/60 text-purple-300 hover:bg-purple-900/60'}">
                             <i class="fa-solid fa-boxes-stacked mr-2"></i> จัดการสต็อกของรางวัล
@@ -808,14 +824,12 @@
                                                             </div>
                                                             <div class="text-sm font-bold text-white mb-2">คงเหลือ: <span id="stock-val-${b.id}-${r.id}" class="${inv.stock > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}">${inv.stock} ชิ้น</span></div>
                                                             
-                                                            <!-- ปุ่มลัดกดบวก/ลบด่วน -->
                                                             <div class="flex items-center space-x-1 mb-2">
                                                                 <button onclick="updateStock('${b.id}', '${r.id}', -1)" class="w-8 h-8 bg-red-900/60 rounded-lg text-xs hover:bg-red-800 font-bold">-1</button>
                                                                 <button onclick="updateStock('${b.id}', '${r.id}', 1)" class="w-8 h-8 bg-green-900/60 rounded-lg text-xs hover:bg-green-800 font-bold">+1</button>
                                                                 <button onclick="updateStock('${b.id}', '${r.id}', 10)" class="w-8 h-8 bg-purple-800 rounded-lg text-xs hover:bg-purple-700 font-bold">+10</button>
                                                             </div>
 
-                                                            <!-- ปุ่มเดียวเปิดป็อบอัพกรอกจำนวน -->
                                                             <button onclick="openStockModal('${b.id}', '${r.id}')" class="w-full py-2 bg-orange-600 text-white rounded-xl text-xs font-bold hover:bg-orange-500 shadow flex items-center justify-center space-x-1">
                                                                 <i class="fa-solid fa-pen-to-square"></i>
                                                                 <span>ระบุจำนวน</span>
@@ -869,7 +883,6 @@
             `;
         }
 
-        // ป็อบอัพกรอกจำนวนสต็อกสุดน่ารัก
         function openStockModal(branchId, rewardId) {
             playSound('click');
             const inv = branchInventories[branchId][rewardId];
