@@ -102,36 +102,59 @@
         let customerData = { name: '', phone: '' };
         let currentAdminRole = null;
 
-        // Render ทันทีไม่ต้องรอโหลด
+        // เรนเดอร์หน้าจอทันที
         renderCurrentView();
 
-        // โหลดข้อมูลจาก Supabase เบื้องหลังแบบเงียบๆ
+        // โหลดข้อมูลจาก Supabase และ Auto-Seed ถ้าตารางว่าง
         async function loadSupabaseData() {
             try {
                 let { data, error } = await supabaseClient.from('rewards').select('*');
-                if (error || !data || data.length === 0) return;
+                
+                if (error || !data || data.length === 0) {
+                    for (let r of defaultRewards) {
+                        let stock_map = {};
+                        let active_map = {};
+                        BRANCHES.forEach(b => {
+                            stock_map[b.id] = 15;
+                            active_map[b.id] = true;
+                        });
+                        await supabaseClient.from('rewards').upsert({
+                            id: r.id,
+                            name: r.name,
+                            image: r.image,
+                            stock_map: stock_map,
+                            active_map: active_map
+                        });
+                    }
+                    let res = await supabaseClient.from('rewards').select('*');
+                    data = res.data;
+                }
 
-                rewards = data.map(r => ({
-                    id: r.id,
-                    name: r.name,
-                    image: r.image,
-                    weight: 15
-                }));
+                if (data && data.length > 0) {
+                    rewards = data.map(r => ({
+                        id: r.id,
+                        name: r.name,
+                        image: r.image,
+                        weight: 15
+                    }));
 
-                branchInventories = {};
-                BRANCHES.forEach(b => {
-                    branchInventories[b.id] = {};
-                    data.forEach(r => {
-                        const sMap = r.stock_map || {};
-                        const aMap = r.active_map || {};
-                        branchInventories[b.id][r.id] = {
-                            stock: sMap[b.id] !== undefined ? sMap[b.id] : 10,
-                            active: aMap[b.id] !== undefined ? aMap[b.id] : true
-                        };
+                    branchInventories = {};
+                    BRANCHES.forEach(b => {
+                        branchInventories[b.id] = {};
+                        data.forEach(r => {
+                            const sMap = r.stock_map || {};
+                            const aMap = r.active_map || {};
+                            branchInventories[b.id][r.id] = {
+                                stock: sMap[b.id] !== undefined ? sMap[b.id] : 15,
+                                active: aMap[b.id] !== undefined ? aMap[b.id] : true
+                            };
+                        });
                     });
-                });
-                renderCurrentView();
-            } catch (err) {}
+                    renderCurrentView();
+                }
+            } catch (err) {
+                console.error(err);
+            }
         }
 
         loadSupabaseData();
@@ -151,7 +174,7 @@
             let stock_map = {};
             let active_map = {};
             BRANCHES.forEach(b => {
-                stock_map[b.id] = branchInventories[b.id]?.[rewardId]?.stock ?? 10;
+                stock_map[b.id] = branchInventories[b.id]?.[rewardId]?.stock ?? 15;
                 active_map[b.id] = branchInventories[b.id]?.[rewardId]?.active ?? true;
             });
 
@@ -701,7 +724,7 @@
 
                                         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                                             ${targetBranches.map(b => {
-                                                const inv = branchInventories[b.id]?.[r.id] || { stock: 10, active: true };
+                                                const inv = branchInventories[b.id]?.[r.id] || { stock: 15, active: true };
                                                 return `
                                                     <div class="bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}">
                                                         <div class="flex justify-between items-center mb-2">
@@ -952,7 +975,7 @@
                 rewards.push(newReward);
                 BRANCHES.forEach(b => {
                     if (!branchInventories[b.id]) branchInventories[b.id] = {};
-                    branchInventories[b.id][newId] = { stock: 10, active: true };
+                    branchInventories[b.id][newId] = { stock: 15, active: true };
                 });
 
                 await saveRewardToSupabase(newId);
