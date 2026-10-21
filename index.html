@@ -60,7 +60,6 @@
     </header>
 
     <main id="app-container" class="flex-grow container mx-auto px-4 py-8 max-w-4xl z-10 flex flex-col items-center justify-center">
-        <div class="text-center text-orange-400 text-xl animate-pulse">กำลังโหลดข้อมูลจากคลาวด์... 🎃</div>
     </main>
 
     <footer class="w-full py-4 text-center text-xs text-purple-400/60 z-20 border-t border-purple-900/40">
@@ -88,41 +87,29 @@
             { id: 'r6', name: 'กระเป๋ากระสอบ คละแบบ', image: '👜', weight: 10 }
         ];
 
-        let rewards = [];
+        let rewards = defaultRewards;
         let branchInventories = {};
-        let customers = JSON.parse(localStorage.getItem('ncn_customers')) || {};
+        BRANCHES.forEach(b => {
+            branchInventories[b.id] = {};
+            defaultRewards.forEach(r => {
+                branchInventories[b.id][r.id] = { stock: 15, active: true };
+            });
+        });
 
+        let customers = JSON.parse(localStorage.getItem('ncn_customers')) || {};
         let currentView = 'home';
         let selectedBranch = BRANCHES[0].id;
         let customerData = { name: '', phone: '' };
         let currentAdminRole = null;
 
-        // Load data from Supabase
+        // Render ทันทีไม่ต้องรอโหลด
+        renderCurrentView();
+
+        // โหลดข้อมูลจาก Supabase เบื้องหลังแบบเงียบๆ
         async function loadSupabaseData() {
             try {
                 let { data, error } = await supabaseClient.from('rewards').select('*');
-                if (error) throw error;
-
-                if (!data || data.length === 0) {
-                    // Seed initial data if empty
-                    for (let r of defaultRewards) {
-                        let stock_map = {};
-                        let active_map = {};
-                        BRANCHES.forEach(b => {
-                            stock_map[b.id] = 15;
-                            active_map[b.id] = true;
-                        });
-                        await supabaseClient.from('rewards').insert({
-                            id: r.id,
-                            name: r.name,
-                            image: r.image,
-                            stock_map: stock_map,
-                            active_map: active_map
-                        });
-                    }
-                    let res = await supabaseClient.from('rewards').select('*');
-                    data = res.data;
-                }
+                if (error || !data || data.length === 0) return;
 
                 rewards = data.map(r => ({
                     id: r.id,
@@ -143,12 +130,11 @@
                         };
                     });
                 });
-
                 renderCurrentView();
-            } catch (err) {
-                console.error('Error loading data:', err);
-            }
+            } catch (err) {}
         }
+
+        loadSupabaseData();
 
         // Realtime Subscription
         supabaseClient
@@ -176,13 +162,6 @@
                 stock_map: stock_map,
                 active_map: active_map
             });
-        }
-
-        async function saveAllToSupabase() {
-            for (let r of rewards) {
-                await saveRewardToSupabase(r.id);
-            }
-            localStorage.setItem('ncn_customers', JSON.stringify(customers));
         }
 
         let audioCtx = null;
@@ -339,7 +318,7 @@
                         <div class="marquee-container py-2 cursor-pointer">
                             <div class="marquee-track">
                                 ${rewards.concat(rewards).map(r => {
-                                    const inv = branchInventories[selectedBranch]?.[r.id] || { stock: 10, active: true };
+                                    const inv = branchInventories[selectedBranch]?.[r.id] || { stock: r.stock, active: true };
                                     const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
                                     return `
                                         <div onclick="showRewardDetail('${r.name}', '${r.image}', ${inv.stock})" class="flex-shrink-0 w-32 bg-purple-900/40 border border-purple-700/50 rounded-xl p-3 text-center hover:border-orange-500 transition-all">
@@ -592,4 +571,239 @@
             return `
                 <div class="w-full max-w-md card-glass p-6 md:p-8 rounded-2xl glow-orange">
                     <div class="text-center mb-6">
-                        <div class="w-16 h-16 mx-auto mb-2 rounded-2xl bg-orange-500
+                        <div class="w-16 h-16 mx-auto mb-2 rounded-2xl bg-orange-500/20 flex items-center justify-center text-3xl glow-orange">🔐</div>
+                        <h2 class="text-2xl font-bold text-orange-400">เข้าสู่ระบบ Admin / สาขา</h2>
+                        <p class="text-purple-300 text-xs mt-1">กรุณาเลือกสาขาและใส่รหัสผ่านประจำสาขา</p>
+                    </div>
+
+                    <form id="admin-login-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-orange-300 mb-1">เลือกสาขา หรือ แอดมินส่วนกลาง</label>
+                            <select id="admin-branch-select" class="w-full px-4 py-3 rounded-xl bg-purple-950/80 border border-purple-700 text-white focus:outline-none focus:border-orange-500">
+                                <option value="central">👑 แอดมินส่วนกลาง (ดูภาพรวมทุกสาขา)</option>
+                                ${BRANCHES.map(b => `<option value="${b.id}">🏪 สาขา: ${b.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-orange-300 mb-1">รหัสผ่านประจำสาขา (Passcode)</label>
+                            <input type="password" id="admin-passcode" required placeholder="กรอกรหัสผ่าน" class="w-full px-4 py-3 rounded-xl bg-purple-950/80 border border-purple-700 text-white focus:outline-none focus:border-orange-500">
+                        </div>
+                        <button type="submit" class="w-full py-3 rounded-xl bg-orange-600 text-white font-bold hover:bg-orange-500 glow-orange">เข้าสู่ระบบแอดมิน</button>
+                    </form>
+
+                    <div class="text-center mt-6">
+                        <button onclick="goToHome()" class="text-xs text-purple-400 hover:text-orange-300 underline">← กลับสู่หน้าหลักลูกค้า</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function attachAdminLoginEvents() {
+            const form = document.getElementById('admin-login-form');
+            if (!form) return;
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                playSound('click');
+                const branchChoice = document.getElementById('admin-branch-select').value;
+                const passcode = document.getElementById('admin-passcode').value.trim();
+
+                const passcodes = {
+                    'central': 'ncpm2014',
+                    'lansaka': 'LM2014',
+                    'nantachon1': 'NC2014',
+                    'thaiwatsadu': 'TP2014',
+                    'kokbok': 'KB2014',
+                    'khaokhao': 'KK2014',
+                    'thaphae': 'VT2014',
+                    'chanoknan': 'CH2014'
+                };
+
+                if (passcodes[branchChoice] && passcodes[branchChoice] === passcode) {
+                    currentAdminRole = branchChoice;
+                    currentView = 'admin_dashboard';
+                    renderCurrentView();
+                } else {
+                    playSound('error');
+                    alert('❌ รหัสผ่านไม่ถูกต้อง กรุณาลองใหม่อีกครั้ง');
+                }
+            });
+        }
+
+        function renderAdminDashboardHTML() {
+            const isCentral = currentAdminRole === 'central';
+            const roleName = isCentral ? 'แอดมินส่วนกลาง (ทุกสาขา)' : (BRANCHES.find(b => b.id === currentAdminRole)?.name || '');
+
+            let totalCustomers = Object.keys(customers).length;
+            let totalDraws = 0;
+            Object.values(customers).forEach(c => totalDraws += (c.drawsCount || 0));
+
+            return `
+                <div class="w-full card-glass p-6 rounded-2xl glow-purple">
+                    <div class="flex flex-col md:flex-row justify-between items-center mb-6 pb-4 border-b border-purple-800/40 gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-orange-400">📊 แผงควบคุมระบบ (Admin Dashboard)</h2>
+                            <p class="text-xs text-purple-300">สิทธิ์ผู้ใช้งาน: <span class="text-white font-bold">${roleName}</span></p>
+                        </div>
+                        <div class="flex space-x-2">
+                            <button onclick="goToHome()" class="px-4 py-2 bg-purple-900/80 rounded-xl text-xs text-purple-200 hover:bg-purple-800">หน้าเว็บลูกค้า</button>
+                            <button onclick="currentAdminRole=null; goToHome();" class="px-4 py-2 bg-red-600/80 rounded-xl text-xs text-white hover:bg-red-500">ออกจากระบบ</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-orange-400 font-bold">${totalCustomers}</div>
+                            <div class="text-xs text-purple-300 mt-1">ลูกค้าที่เข้าร่วม (คน)</div>
+                        </div>
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-orange-400 font-bold">${totalDraws}</div>
+                            <div class="text-xs text-purple-300 mt-1">จำนวนครั้งที่สุ่ม</div>
+                        </div>
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-orange-400 font-bold">${rewards.length}</div>
+                            <div class="text-xs text-purple-300 mt-1">รายการของรางวัล</div>
+                        </div>
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-green-400 font-bold">Realtime</div>
+                            <div class="text-xs text-purple-300 mt-1">สถานะ Supabase Sync</div>
+                        </div>
+                    </div>
+
+                    <div class="mb-8">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold text-orange-300"><i class="fa-solid fa-boxes-stacked mr-2"></i> จัดการของรางวัลและสต็อกแยกตามสาขา</h3>
+                            ${isCentral ? `<button onclick="addNewRewardModal()" class="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-500">+ เพิ่มของรางวัลใหม่</button>` : ''}
+                        </div>
+
+                        <div class="space-y-6">
+                            ${rewards.map(r => {
+                                const targetBranches = isCentral ? BRANCHES : BRANCHES.filter(b => b.id === currentAdminRole);
+                                const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
+                                return `
+                                    <div class="card-glass p-5 rounded-xl border border-purple-700/60">
+                                        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 pb-3 border-b border-purple-800/40 gap-3">
+                                            <div class="flex items-center space-x-3">
+                                                <div class="text-4xl bg-purple-900/60 p-2 rounded-xl flex items-center justify-center w-14 h-14">
+                                                    ${isImg ? `<img src="${r.image}" class="w-10 h-10 object-cover rounded-lg">` : r.image}
+                                                </div>
+                                                <div>
+                                                    <h4 class="font-bold text-white text-lg">${r.name}</h4>
+                                                    <p class="text-xs text-purple-300">น้ำหนักโอกาสสุ่ม: 15% | ${isCentral ? 'ซิงก์สต็อกตรงกันทั้ง 7 สาขา' : 'สต็อกสาขาของคุณ'}</p>
+                                                </div>
+                                            </div>
+                                            ${isCentral ? `
+                                                <div class="flex space-x-2">
+                                                    <button onclick="editRewardModal('${r.id}')" class="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs hover:bg-amber-500">✏️ แก้ไขชื่อ/รูป</button>
+                                                    <button onclick="deleteReward('${r.id}')" class="px-3 py-1 bg-red-600 text-white rounded-lg text-xs hover:bg-red-500">🗑️ ลบของรางวัล</button>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+
+                                        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                            ${targetBranches.map(b => {
+                                                const inv = branchInventories[b.id]?.[r.id] || { stock: 10, active: true };
+                                                return `
+                                                    <div class="bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}">
+                                                        <div class="flex justify-between items-center mb-2">
+                                                            <span class="text-xs font-semibold text-orange-300 truncate">${b.name}</span>
+                                                            <button onclick="toggleBranchReward('${b.id}', '${r.id}')" class="px-2 py-0.5 rounded text-[10px] ${inv.active ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}">
+                                                                ${inv.active ? 'เปิดสุ่ม' : 'ปิดการสุ่ม'}
+                                                            </button>
+                                                        </div>
+                                                        <div class="text-sm font-bold text-white mb-2">คงเหลือ: <span class="${inv.stock > 0 ? 'text-green-400' : 'text-red-400'}">${inv.stock} ชิ้น</span></div>
+                                                        
+                                                        <div class="flex items-center space-x-1">
+                                                            <button onclick="updateStock('${b.id}', '${r.id}', -1)" class="w-7 h-7 bg-red-900/60 rounded text-xs hover:bg-red-800">-1</button>
+                                                            <button onclick="updateStock('${b.id}', '${r.id}', 1)" class="w-7 h-7 bg-green-900/60 rounded text-xs hover:bg-green-800">+1</button>
+                                                            <button onclick="updateStock('${b.id}', '${r.id}', 5)" class="w-7 h-7 bg-purple-800 rounded text-xs hover:bg-purple-700">+5</button>
+                                                            <button onclick="customStockPrompt('${b.id}', '${r.id}')" class="flex-1 py-1 bg-orange-600/80 text-white rounded text-[10px] hover:bg-orange-500">ระบุจำนวน</button>
+                                                        </div>
+                                                    </div>
+                                                `;
+                                            }).join('')}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-lg font-bold text-orange-300 mb-4"><i class="fa-solid fa-users mr-2"></i> ประวัติลูกค้าและจัดการสิทธิ์ (สูงสุด 2 ครั้ง/เบอร์)</h3>
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-left text-sm text-purple-200">
+                                <thead class="bg-purple-950 text-orange-300 uppercase text-xs border-b border-purple-800">
+                                    <tr>
+                                        <th class="p-3">เบอร์โทรศัพท์</th>
+                                        <th class="p-3">ชื่อลูกค้า</th>
+                                        <th class="p-3">สิทธิ์ที่ใช้ไป</th>
+                                        <th class="p-3">ประวัติรางวัลที่ได้รับ</th>
+                                        <th class="p-3 text-center">จัดการสิทธิ์</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-purple-900/50">
+                                    ${Object.keys(customers).length === 0 ? `
+                                        <tr><td colspan="5" class="p-4 text-center text-purple-400">ยังไม่มีข้อมูลประวัติการสุ่มของลูกค้า</td></tr>
+                                    ` : Object.entries(customers).map(([phone, data]) => `
+                                        <tr class="hover:bg-purple-900/20">
+                                            <td class="p-3 font-mono font-bold text-orange-300">${phone}</td>
+                                            <td class="p-3">${data.name || '-'}</td>
+                                            <td class="p-3"><span class="px-2 py-0.5 rounded bg-purple-900 text-xs">${data.drawsCount} / 2 ครั้ง</span></td>
+                                            <td class="p-3 text-xs">
+                                                ${(data.history || []).map(h => `<div>${h.rewardImage} ${h.rewardName} (${h.branchName})</div>`).join('')}
+                                            </td>
+                                            <td class="p-3 text-center">
+                                                <button onclick="resetCustomerRights('${phone}')" class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-500 mr-1">รีเซ็ตสิทธิ์ (0)</button>
+                                                <button onclick="deleteCustomerRecord('${phone}')" class="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-500">ลบข้อมูล</button>
+                                            </td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function attachAdminDashboardEvents() {}
+
+        async function updateStock(branchId, rewardId, amount) {
+            playSound('click');
+            let inv = branchInventories[branchId][rewardId];
+            inv.stock = Math.max(0, inv.stock + amount);
+            await saveRewardToSupabase(rewardId);
+            renderCurrentView();
+        }
+
+        async function customStockPrompt(branchId, rewardId) {
+            playSound('click');
+            let val = prompt('กรอกจำนวนสต็อกใหม่ที่ต้องการ:');
+            if (val !== null && !isNaN(val)) {
+                branchInventories[branchId][rewardId].stock = Math.max(0, parseInt(val));
+                await saveRewardToSupabase(rewardId);
+                renderCurrentView();
+            }
+        }
+
+        async function toggleBranchReward(branchId, rewardId) {
+            playSound('click');
+            let inv = branchInventories[branchId][rewardId];
+            inv.active = !inv.active;
+            await saveRewardToSupabase(rewardId);
+            renderCurrentView();
+        }
+
+        function editRewardModal(rewardId) {
+            playSound('click');
+            let reward = rewards.find(r => r.id === rewardId);
+            if (!reward) return;
+
+            let tempImage = reward.image;
+            const isImg = typeof reward.image === 'string' && reward.image.startsWith('data:image');
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 rounded-2xl max-w-md w-full glow-orange">
+                    <h3 class="text-xl font-bold text-orange-400 mb-4"><i class="fa-solid fa-pen-to-square mr
