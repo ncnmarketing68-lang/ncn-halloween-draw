@@ -470,6 +470,7 @@
 
                 customerData = { name, phone };
 
+                // เช็คสิทธิ์จาก Supabase แบบเรียลไทม์
                 let drawsCount = 0;
                 if (supabaseClient) {
                     try {
@@ -479,7 +480,6 @@
                 }
 
                 if (drawsCount >= 2) {
-                    // ดึงประวัติรางวัลที่เคยได้มาแสดงให้ลูกค้าเห็นในป็อบอัพด้วย
                     let historyList = '';
                     if (supabaseClient) {
                         let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
@@ -517,7 +517,6 @@
                         </div>
                     </div>
 
-                    <!-- แสดงประวัติรางวัลที่เคยสุ่มได้ในหน้านี้ด้วย -->
                     ${custRecord.history.length > 0 ? `
                         <div class="mb-6 bg-purple-950/50 p-4 rounded-xl border border-orange-500/30 text-left">
                             <h4 class="text-xs font-bold text-orange-300 mb-2"><i class="fa-solid fa-gift mr-1"></i> ประวัติรางวัลที่คุณเคยได้รับแล้ว (${custRecord.history.length}/2):</h4>
@@ -552,6 +551,7 @@
         async function openBox(boxNum) {
             playSound('magic');
             
+            // เช็คสิทธิ์จาก Supabase อีกครั้งก่อนเปิดกล่อง ป้องกันการกดรัวๆ ข้ามสาขา
             let drawsCount = 0;
             if (supabaseClient) {
                 try {
@@ -561,7 +561,7 @@
             }
 
             if (drawsCount >= 2) {
-                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup', () => {
+                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ', () => {
                     goToHome();
                 });
                 return;
@@ -607,6 +607,7 @@
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
             const timeStr = new Date().toLocaleString('th-TH');
 
+            // บันทึกประวัติลงตาราง draw_records บน Supabase ทันที
             if (supabaseClient) {
                 try {
                     await supabaseClient.from('draw_records').insert({
