@@ -304,7 +304,6 @@
                     grouped[phone] = { phone: phone, name: rec.name, branch_id: rec.branch_id || '', drawsCount: 0, history: [] };
                 }
                 grouped[phone].drawsCount += 1;
-                // บันทึก branch_id ลงไปในประวัติด้วย (รองรับข้อมูลเก่าที่อาจไม่มี branch_id)
                 let bId = rec.branch_id || (BRANCHES.find(b => b.name === rec.branch_name)?.id) || '';
                 grouped[phone].history.push({
                     rewardName: rec.reward_name,
