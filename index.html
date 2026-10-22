@@ -107,7 +107,6 @@
         });
 
         let customers = JSON.parse(localStorage.getItem('ncn_customers')) || {};
-        let drawRecordsCache = [];
         let currentView = 'home';
         let selectedBranch = BRANCHES[0].id;
         let customerData = { name: '', phone: '' };
@@ -231,6 +230,7 @@
         async function loadSupabaseData() {
             if (!supabaseClient) return;
             try {
+                // ดึงสต็อกรางวัล
                 let { data: rewData } = await supabaseClient.from('rewards').select('*');
                 if (rewData && rewData.length > 0) {
                     rewards = rewData.map(r => ({
@@ -252,22 +252,27 @@
                     localStorage.setItem('ncn_inv_cache', JSON.stringify(branchInventories));
                 }
 
-                let { data: recData } = await supabaseClient.from('draw_records').select('*');
-                if (recData) {
-                    drawRecordsCache = recData;
-                    customers = {};
+                // ดึงและรวมประวัติลูกค้า (ป้องกันสิทธิ์หลุด)
+                let { data: recData, error } = await supabaseClient.from('draw_records').select('*');
+                if (!error && recData) {
+                    let localCust = JSON.parse(localStorage.getItem('ncn_customers')) || {};
                     recData.forEach(r => {
                         let phone = r.phone;
-                        if (!customers[phone]) {
-                            customers[phone] = { name: r.name, drawsCount: 0, history: [] };
+                        if (!localCust[phone]) {
+                            localCust[phone] = { name: r.name, drawsCount: 0, history: [] };
                         }
-                        customers[phone].drawsCount += 1;
-                        customers[phone].history.push({
-                            rewardName: r.reward_name,
-                            branchName: r.branch_name,
-                            time: r.time
-                        });
+                        // ป้องกันข้อมูลซ้ำ
+                        let exists = localCust[phone].history.some(h => h.time === r.time && h.rewardName === r.reward_name);
+                        if (!exists) {
+                            localCust[phone].drawsCount += 1;
+                            localCust[phone].history.push({
+                                rewardName: r.reward_name || 'ไม่ระบุ',
+                                branchName: r.branch_name,
+                                time: r.time || ''
+                            });
+                        }
                     });
+                    customers = localCust;
                     localStorage.setItem('ncn_customers', JSON.stringify(customers));
                 }
                 renderCurrentView();
@@ -296,19 +301,8 @@
         }
 
         if (supabaseClient) {
-            supabaseClient
-                .channel('public:draw_records')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'draw_records' }, () => {
-                    loadSupabaseData();
-                })
-                .subscribe();
-
-            supabaseClient
-                .channel('public:rewards')
-                .on('postgres_changes', { event: '*', schema: 'public', table: 'rewards' }, () => {
-                    loadSupabaseData();
-                })
-                .subscribe();
+            supabaseClient.channel('public:draw_records').on('postgres_changes', { event: '*', schema: 'public', table: 'draw_records' }, () => { loadSupabaseData(); }).subscribe();
+            supabaseClient.channel('public:rewards').on('postgres_changes', { event: '*', schema: 'public', table: 'rewards' }, () => { loadSupabaseData(); }).subscribe();
         }
 
         function renderCurrentView() {
@@ -466,24 +460,25 @@
                     return;
                 }
 
-                customerData = { name, phone };
-
-                let drawsCount = 0;
+                // ป้องกันสิทธิ์หลุด: เช็คจำนวนสิทธิ์ทั้งจากเครื่อง และ Supabase รวมกัน
+                let localDraws = customers[phone] ? customers[phone].drawsCount : 0;
+                let supaDraws = 0;
+                
                 if (supabaseClient) {
                     try {
-                        let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
-                        if (data) drawsCount = data.length;
+                        let { data, error } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
+                        if (data) supaDraws = data.length;
                     } catch (e) {}
                 }
-                if (drawsCount === 0 && customers[phone]) {
-                    drawsCount = customers[phone].drawsCount;
-                }
+                
+                let finalDrawsCount = Math.max(localDraws, supaDraws);
 
-                if (drawsCount >= 2) {
+                if (finalDrawsCount >= 2) {
                     showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'หมายเลขโทรศัพท์นี้ใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว (รวมทุกสาขา)<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ!');
                     return;
                 }
 
+                customerData = { name, phone };
                 currentView = 'draw';
                 renderCurrentView();
             });
@@ -532,21 +527,18 @@
         async function openBox(boxNum) {
             playSound('magic');
             
-            let drawsCount = 0;
+            // Re-verify เพื่อความชัวร์ 100% (ป้องกันเปิดแท็บซ้อน)
+            let localDraws = customers[customerData.phone] ? customers[customerData.phone].drawsCount : 0;
+            let supaDraws = 0;
             if (supabaseClient) {
                 try {
                     let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', customerData.phone);
-                    if (data) drawsCount = data.length;
-                } catch (e) {}
-            }
-            if (drawsCount === 0 && customers[customerData.phone]) {
-                drawsCount = customers[customerData.phone].drawsCount;
+                    if (data) supaDraws = data.length;
+                } catch(e) {}
             }
 
-            if (drawsCount >= 2) {
-                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup', () => {
-                    goToHome();
-                });
+            if (Math.max(localDraws, supaDraws) >= 2) {
+                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup', () => { goToHome(); });
                 return;
             }
 
@@ -584,25 +576,14 @@
             `;
             document.body.appendChild(magicModal);
 
+            // 1. ตัดสต็อก
             branchInventories[selectedBranch][wonReward.id].stock -= 1;
             await saveRewardToSupabase(wonReward.id);
 
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
             const timeStr = new Date().toLocaleString('th-TH');
 
-            if (supabaseClient) {
-                try {
-                    await supabaseClient.from('draw_records').insert({
-                        phone: customerData.phone,
-                        name: customerData.name,
-                        branch_id: selectedBranch,
-                        branch_name: branchObj.name,
-                        reward_name: wonReward.name,
-                        time: timeStr
-                    });
-                } catch (e) {}
-            }
-
+            // 2. บันทึกสิทธิ์ลงเครื่องทันที (ป้องกันเน็ตหลุด)
             if (!customers[customerData.phone]) {
                 customers[customerData.phone] = { name: customerData.name, drawsCount: 0, history: [] };
             }
@@ -613,6 +594,22 @@
                 time: timeStr
             });
             localStorage.setItem('ncn_customers', JSON.stringify(customers));
+
+            // 3. ส่งข้อมูลขึ้น Supabase
+            if (supabaseClient) {
+                try {
+                    await supabaseClient.from('draw_records').insert([{
+                        phone: customerData.phone,
+                        name: customerData.name,
+                        branch_id: selectedBranch,
+                        branch_name: branchObj.name,
+                        reward_name: wonReward.name,
+                        time: timeStr
+                    }]);
+                } catch (e) {
+                    console.warn("Supabase Save Error:", e);
+                }
+            }
 
             setTimeout(() => {
                 document.getElementById('magic-modal')?.remove();
