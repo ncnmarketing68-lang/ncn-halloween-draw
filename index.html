@@ -301,15 +301,20 @@
             drawRecordsCache.forEach(rec => {
                 let phone = rec.phone;
                 if (!grouped[phone]) {
-                    grouped[phone] = { phone: phone, name: rec.name, branch_id: rec.branch_id, drawsCount: 0, history: [] };
+                    grouped[phone] = { phone: phone, name: rec.name, branch_id: rec.branch_id || '', drawsCount: 0, history: [] };
                 }
                 grouped[phone].drawsCount += 1;
+                // บันทึก branch_id ลงไปในประวัติด้วย (รองรับข้อมูลเก่าที่อาจไม่มี branch_id)
+                let bId = rec.branch_id || (BRANCHES.find(b => b.name === rec.branch_name)?.id) || '';
                 grouped[phone].history.push({
                     rewardName: rec.reward_name,
                     branchName: rec.branch_name,
-                    branchId: rec.branch_id,
+                    branchId: bId,
                     time: rec.time
                 });
+                if (!grouped[phone].branch_id && bId) {
+                    grouped[phone].branch_id = bId;
+                }
             });
             return grouped;
         }
@@ -847,8 +852,7 @@
                                         ${totalCustomers === 0 ? `
                                             <tr><td colspan="5" class="p-4 text-center text-purple-400">ยังไม่มีข้อมูลประวัติการสุ่มของลูกค้า</td></tr>
                                         ` : Object.values(groupedCustomers).map(c => {
-                                            // เช็คว่าแอดมินปัจจุบันมีสิทธิ์จัดการเบอร์นี้ไหม (ถ้าเป็น central หรือเคยเล่นสาขานี้)
-                                            let canManage = isCentral || c.history.some(h => h.branchId === currentAdminRole);
+                                            let canManage = isCentral || c.branch_id === currentAdminRole || c.history.some(h => h.branchId === currentAdminRole);
                                             return `
                                                 <tr class="hover:bg-purple-900/20">
                                                     <td class="p-3 font-mono font-bold text-orange-300">${c.phone}</td>
