@@ -95,6 +95,14 @@
             { id: 'r6', name: 'กระเป๋ากระสอบ คละแบบ', image: '👜', weight: 10 }
         ];
 
+        const magicCasters = [
+            { caster: 'พ่อมดน้อยแห่งฮัลโลวีน', chant: '“ซิมมูซัม พรหมสิทธิ์ โชคลาภจงบังเกิด ณ บัดนี้!”' },
+            { caster: 'แม่มดแห่งความลับราตรี', chant: '“คาลาร่า มาร่าพิกซี่ จงเปิดประตูแห่งขุมทรัพย์!”' },
+            { caster: 'ภูตจิ๋วแห่งกล่องลึกลับ', chant: '“อากาซ่า โชคชะตาจงนำพารางวัลมาสู่ผู้กล้า!”' },
+            { caster: 'ปรมาจารย์คาถาฟักทอง', chant: '“ฮาโลวีน่า วิญญาณแห่งโชค จงสถิตในกล่องนี้!”' },
+            { caster: 'พ่อมดแห่งแสงจันทร์สีเลือด', chant: '“ลูเมน ฟอร์ทูนา มนต์ตราจงบันดาลโชค!”' }
+        ];
+
         let rewards = JSON.parse(localStorage.getItem('ncn_rewards_cache')) || defaultRewards;
         let branchInventories = JSON.parse(localStorage.getItem('ncn_inv_cache')) || {};
         BRANCHES.forEach(b => {
@@ -296,12 +304,11 @@
                 .subscribe();
         }
 
-        // จัดกลุ่มประวัติลูกค้า (ถ้าเป็นแอดมินสาขา จะกรองเฉพาะสาขาตัวเองเท่านั้น)
+        // ฟังก์ชันจัดกลุ่มประวัติ: หากเป็นแอดมินสาขาจะกรองเห็นเฉพาะของสาขาตัวเองเท่านั้น แต่แอดมินกลางเห็นทั้งหมด
         function getGroupedCustomers() {
             let grouped = {};
             let records = drawRecordsCache;
 
-            // ถ้าไม่ใช่แอดมินส่วนกลาง ให้กรองเฉพาะประวัติของสาขาตัวเอง
             if (currentAdminRole && currentAdminRole !== 'central') {
                 records = records.filter(r => r.branch_id === currentAdminRole);
             }
@@ -478,7 +485,6 @@
 
                 customerData = { name, phone };
 
-                // ตรวจสอบสิทธิ์ทั่วทั้งระบบ (ไม่ว่าจะเล่นจากสาขาไหน ถ้ารวมกันครบ 2 ครั้ง จะบล็อกทันที)
                 let globalDrawsCount = 0;
                 if (supabaseClient) {
                     try {
@@ -498,7 +504,6 @@
         }
 
         function renderDrawHTML() {
-            // เช็คจำนวนครั้งที่เคยสุ่มทั่วระบบสำหรับเบอร์นี้
             const userHistory = drawRecordsCache.filter(r => r.phone === customerData.phone);
             const remainingChances = Math.max(0, 2 - userHistory.length);
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
@@ -579,13 +584,15 @@
                 }
             }
 
+            const randomCaster = magicCasters[Math.floor(Math.random() * magicCasters.length)];
+
             const magicModal = document.createElement('div');
             magicModal.id = 'magic-modal';
             magicModal.className = 'fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-center';
             magicModal.innerHTML = `
                 <div class="text-7xl mb-4 animate-bounce">🧙‍♂️✨</div>
-                <h3 class="text-2xl font-bold text-orange-400 mb-2">พ่อมดน้อยกำลังร่ายคาถาเปิดกล่องสุ่ม...</h3>
-                <p class="text-purple-300 text-sm italic mb-6 animate-pulse">"ซิมมูซัม พรหมสิทธิ์ โชคลาภจงบังเกิด ณ บัดนี้!"</p>
+                <h3 class="text-2xl font-bold text-orange-400 mb-2">${randomCaster.caster} กำลังร่ายคาถา...</h3>
+                <p class="text-purple-300 text-sm italic mb-6 animate-pulse">${randomCaster.chant}</p>
                 <div class="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
             `;
             document.body.appendChild(magicModal);
@@ -596,7 +603,6 @@
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
             const timeStr = new Date().toLocaleString('th-TH');
 
-            // บันทึกประวัติลงตาราง draw_records ใน Supabase โดยระบุ branch_id และ branch_name ให้ชัดเจน
             if (supabaseClient) {
                 try {
                     await supabaseClient.from('draw_records').insert({
@@ -610,7 +616,6 @@
                 } catch (e) {}
             }
 
-            // โหลดข้อมูลประวัติล่าสุดทันที
             await loadSupabaseData();
 
             setTimeout(() => {
@@ -733,7 +738,6 @@
             let totalCustomers = Object.keys(groupedCustomers).length;
             let totalDraws = Object.values(groupedCustomers).reduce((sum, c) => sum + c.drawsCount, 0);
 
-            // หากเป็นแอดมินสาขา ให้กรองสต็อกแสดงเฉพาะของสาขาตัวเอง
             const targetBranches = isCentral ? BRANCHES : BRANCHES.filter(b => b.id === currentAdminRole);
 
             return `
