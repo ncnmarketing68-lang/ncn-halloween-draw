@@ -475,6 +475,7 @@
 
                 customerData = { name, phone };
 
+                // เช็คจำนวนครั้งที่เบอร์นี้สุ่มไปแล้วจาก Supabase โดยตรง
                 let drawsCount = 0;
                 if (supabaseClient) {
                     try {
@@ -537,6 +538,7 @@
         async function openBox(boxNum) {
             playSound('magic');
             
+            // เช็คสิทธิ์ซ้ำอีกครั้งก่อนเปิดกล่อง เพื่อป้องกันการกดเบิ้ล
             let drawsCount = 0;
             if (supabaseClient) {
                 try {
@@ -592,6 +594,7 @@
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
             const timeStr = new Date().toLocaleString('th-TH');
 
+            // บันทึกประวัติและรหัสสาขาลงตาราง draw_records ใน Supabase ทันที
             if (supabaseClient) {
                 try {
                     await supabaseClient.from('draw_records').insert({
