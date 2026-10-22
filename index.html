@@ -106,6 +106,7 @@
             });
         });
 
+        let customers = JSON.parse(localStorage.getItem('ncn_customers')) || {};
         let drawRecordsCache = [];
         let currentView = 'home';
         let selectedBranch = BRANCHES[0].id;
@@ -254,8 +255,22 @@
                 let { data: recData } = await supabaseClient.from('draw_records').select('*');
                 if (recData) {
                     drawRecordsCache = recData;
-                    renderCurrentView();
+                    customers = {};
+                    recData.forEach(r => {
+                        let phone = r.phone;
+                        if (!customers[phone]) {
+                            customers[phone] = { name: r.name, drawsCount: 0, history: [] };
+                        }
+                        customers[phone].drawsCount += 1;
+                        customers[phone].history.push({
+                            rewardName: r.reward_name,
+                            branchName: r.branch_name,
+                            time: r.time
+                        });
+                    });
+                    localStorage.setItem('ncn_customers', JSON.stringify(customers));
                 }
+                renderCurrentView();
             } catch (err) {}
         }
 
@@ -294,23 +309,6 @@
                     loadSupabaseData();
                 })
                 .subscribe();
-        }
-
-        function getGroupedCustomers() {
-            let grouped = {};
-            drawRecordsCache.forEach(rec => {
-                let phone = rec.phone;
-                if (!grouped[phone]) {
-                    grouped[phone] = { phone: phone, name: rec.name, drawsCount: 0, history: [] };
-                }
-                grouped[phone].drawsCount += 1;
-                grouped[phone].history.push({
-                    rewardName: rec.reward_name,
-                    branchName: rec.branch_name,
-                    time: rec.time
-                });
-            });
-            return grouped;
         }
 
         function renderCurrentView() {
@@ -470,7 +468,6 @@
 
                 customerData = { name, phone };
 
-                // เช็คสิทธิ์จาก Supabase แบบเรียลไทม์
                 let drawsCount = 0;
                 if (supabaseClient) {
                     try {
@@ -478,18 +475,12 @@
                         if (data) drawsCount = data.length;
                     } catch (e) {}
                 }
+                if (drawsCount === 0 && customers[phone]) {
+                    drawsCount = customers[phone].drawsCount;
+                }
 
                 if (drawsCount >= 2) {
-                    let historyList = '';
-                    if (supabaseClient) {
-                        let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
-                        if (data && data.length > 0) {
-                            historyList = '<div class="mt-3 text-left bg-purple-950/60 p-3 rounded-xl border border-purple-800 text-xs"><p class="text-orange-300 font-bold mb-1">🎁 ประวัติรางวัลที่คุณได้รับ:</p>' + 
-                                data.map(h => `<div>• ${h.reward_name} (${h.branch_name})</div>`).join('') + '</div>';
-                        }
-                    }
-
-                    showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', `หมายเลขโทรศัพท์นี้ใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว (รวมทุกสาขา)<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ!${historyList}`);
+                    showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'หมายเลขโทรศัพท์นี้ใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว (รวมทุกสาขา)<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ!');
                     return;
                 }
 
@@ -499,8 +490,7 @@
         }
 
         function renderDrawHTML() {
-            const grouped = getGroupedCustomers();
-            const custRecord = grouped[customerData.phone] || { drawsCount: 0, history: [] };
+            const custRecord = customers[customerData.phone] || { drawsCount: 0 };
             const remainingChances = 2 - custRecord.drawsCount;
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
 
@@ -517,16 +507,7 @@
                         </div>
                     </div>
 
-                    ${custRecord.history.length > 0 ? `
-                        <div class="mb-6 bg-purple-950/50 p-4 rounded-xl border border-orange-500/30 text-left">
-                            <h4 class="text-xs font-bold text-orange-300 mb-2"><i class="fa-solid fa-gift mr-1"></i> ประวัติรางวัลที่คุณเคยได้รับแล้ว (${custRecord.history.length}/2):</h4>
-                            <div class="space-y-1">
-                                ${custRecord.history.map(h => `<div class="text-xs text-purple-200 flex justify-between"><span>🎁 ${h.rewardName}</span><span class="text-purple-400 text-[10px]">${h.branchName} (${h.time})</span></div>`).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-
-                    <div class="mb-6">
+                    <div class="mb-8">
                         <h2 class="text-2xl font-bold text-white mb-2">🎁 เลือกกล่องสุ่มนำโชค Halloween 🎃</h2>
                         <p class="text-purple-300 text-sm">คลิกเลือกกล่องของขวัญด้านล่าง 1 กล่องเพื่อเปิดลุ้นรางวัลพิเศษ!</p>
                     </div>
@@ -551,7 +532,6 @@
         async function openBox(boxNum) {
             playSound('magic');
             
-            // เช็คสิทธิ์จาก Supabase อีกครั้งก่อนเปิดกล่อง ป้องกันการกดรัวๆ ข้ามสาขา
             let drawsCount = 0;
             if (supabaseClient) {
                 try {
@@ -559,9 +539,12 @@
                     if (data) drawsCount = data.length;
                 } catch (e) {}
             }
+            if (drawsCount === 0 && customers[customerData.phone]) {
+                drawsCount = customers[customerData.phone].drawsCount;
+            }
 
             if (drawsCount >= 2) {
-                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ', () => {
+                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup', () => {
                     goToHome();
                 });
                 return;
@@ -607,12 +590,12 @@
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
             const timeStr = new Date().toLocaleString('th-TH');
 
-            // บันทึกประวัติลงตาราง draw_records บน Supabase ทันที
             if (supabaseClient) {
                 try {
                     await supabaseClient.from('draw_records').insert({
                         phone: customerData.phone,
                         name: customerData.name,
+                        branch_id: selectedBranch,
                         branch_name: branchObj.name,
                         reward_name: wonReward.name,
                         time: timeStr
@@ -620,37 +603,66 @@
                 } catch (e) {}
             }
 
+            if (!customers[customerData.phone]) {
+                customers[customerData.phone] = { name: customerData.name, drawsCount: 0, history: [] };
+            }
+            customers[customerData.phone].drawsCount += 1;
+            customers[customerData.phone].history.push({
+                rewardName: wonReward.name,
+                branchName: branchObj.name,
+                time: timeStr
+            });
+            localStorage.setItem('ncn_customers', JSON.stringify(customers));
+
             setTimeout(() => {
                 document.getElementById('magic-modal')?.remove();
                 playSound('win');
-                showWinPopup(wonReward, drawsCount + 1);
+                showWinPopup(wonReward, customers[customerData.phone].drawsCount);
             }, 2000);
         }
 
+        // ป็อบอัพโชว์รางวัลที่ได้ล่าสุด และประวัติรางวัลทั้งหมดของลูกค้ารายนี้
         function showWinPopup(reward, drawsCount) {
             const branchObj = BRANCHES.find(b => b.id === selectedBranch);
             const remaining = 2 - drawsCount;
             const isImg = typeof reward.image === 'string' && reward.image.startsWith('data:image');
+            const custRecord = customers[customerData.phone] || { history: [] };
 
             const modal = document.createElement('div');
-            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4';
             modal.innerHTML = `
                 <div class="card-glass p-6 md:p-8 rounded-2xl max-w-md w-full text-center glow-orange relative">
-                    <div class="text-6xl mb-3 animate-bounce">🎉</div>
+                    <div class="text-6xl mb-2 animate-bounce">🎉</div>
                     <h3 class="text-2xl font-bold text-orange-400 mb-1">ยินดีด้วย! คุณได้รับรางวัล</h3>
-                    <div class="my-6 p-4 bg-purple-950/60 rounded-xl border border-orange-500/40">
+                    
+                    <div class="my-4 p-4 bg-purple-950/60 rounded-xl border border-orange-500/40">
                         <div class="text-5xl mb-2 flex items-center justify-center h-20">
                             ${isImg ? `<img src="${reward.image}" class="w-20 h-20 object-cover rounded-xl shadow-lg">` : reward.image}
                         </div>
                         <h4 class="text-xl font-bold text-white">${reward.name}</h4>
-                        <p class="text-xs text-purple-300 mt-1">สาขาที่ร่วมกิจกรรม: ${branchObj.name}</p>
+                        <p class="text-xs text-purple-300 mt-1">สาขา: ${branchObj.name}</p>
                     </div>
-                    <p class="text-sm text-purple-200 mb-6">สิทธิ์ที่ใช้ไป: ${drawsCount}/2 ครั้ง (เหลือสิทธิ์: ${remaining} ครั้ง)</p>
+
+                    <!-- แสดงประวัติรางวัลทั้งหมดของเบอร์นี้ -->
+                    <div class="mb-4 text-left bg-purple-900/40 p-3 rounded-xl border border-purple-700/50">
+                        <div class="text-xs font-bold text-orange-300 mb-2"><i class="fa-solid fa-clock-rotate-left mr-1"></i> ประวัติรางวัลที่คุณสุ่มได้ทั้งหมด:</div>
+                        <div class="space-y-1 max-h-28 overflow-y-auto pr-1">
+                            ${custRecord.history.map((h, index) => `
+                                <div class="text-xs text-purple-200 flex justify-between items-center bg-purple-950/60 p-2 rounded-lg">
+                                    <span><b>#${index + 1}</b> 🎁 ${h.rewardName}</span>
+                                    <span class="text-[10px] text-purple-400">${h.branchName}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <p class="text-xs text-purple-200 mb-6">สิทธิ์ที่ใช้ไป: <b class="text-orange-400">${drawsCount}/2 ครั้ง</b> (เหลือสิทธิ์: ${remaining} ครั้ง)</p>
+                    
                     <div class="flex space-x-3">
                         ${remaining > 0 ? `
-                            <button onclick="this.closest('.fixed').remove(); currentView='draw'; renderCurrentView();" class="flex-1 py-3 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-500">สุ่มอีกครั้ง ✨</button>
+                            <button onclick="this.closest('.fixed').remove(); currentView='draw'; renderCurrentView();" class="flex-1 py-3 bg-orange-600 text-white rounded-xl font-bold text-sm hover:bg-orange-500">สุ่มอีกครั้ง ✨</button>
                         ` : ''}
-                        <button onclick="this.closest('.fixed').remove(); goToHome();" class="flex-1 py-3 bg-purple-800 text-purple-200 rounded-xl font-bold hover:bg-purple-700">เสร็จสิ้น</button>
+                        <button onclick="this.closest('.fixed').remove(); goToHome();" class="flex-1 py-3 bg-purple-800 text-purple-200 rounded-xl font-bold text-sm hover:bg-purple-700">เสร็จสิ้น</button>
                     </div>
                 </div>
             `;
@@ -736,9 +748,9 @@
             const isCentral = currentAdminRole === 'central';
             const roleName = isCentral ? 'แอดมินส่วนกลาง (ทุกสาขา)' : (BRANCHES.find(b => b.id === currentAdminRole)?.name || '');
 
-            const groupedCustomers = getGroupedCustomers();
-            let totalCustomers = Object.keys(groupedCustomers).length;
-            let totalDraws = drawRecordsCache.length;
+            let totalCustomers = Object.keys(customers).length;
+            let totalDraws = 0;
+            Object.values(customers).forEach(c => totalDraws += (c.drawsCount || 0));
 
             return `
                 <div class="w-full card-glass p-6 rounded-2xl glow-purple">
@@ -858,28 +870,24 @@
                                             <th class="p-3">เบอร์โทรศัพท์</th>
                                             <th class="p-3">ชื่อลูกค้า</th>
                                             <th class="p-3">สิทธิ์ที่ใช้ไป</th>
-                                            <th class="p-3">ประวัติรางวัลที่ได้รับ (แสดงทุกสาขา)</th>
+                                            <th class="p-3">ประวัติรางวัลที่ได้รับ</th>
                                             <th class="p-3 text-center">จัดการสิทธิ์</th>
                                         </tr>
                                     </thead>
                                     <tbody class="divide-y divide-purple-900/50">
                                         ${totalCustomers === 0 ? `
                                             <tr><td colspan="5" class="p-4 text-center text-purple-400">ยังไม่มีข้อมูลประวัติการสุ่มของลูกค้า</td></tr>
-                                        ` : Object.values(groupedCustomers).map(c => `
+                                        ` : Object.entries(customers).map(([phone, data]) => `
                                             <tr class="hover:bg-purple-900/20">
-                                                <td class="p-3 font-mono font-bold text-orange-300">${c.phone}</td>
-                                                <td class="p-3">${c.name || '-'}</td>
-                                                <td class="p-3"><span class="px-2 py-0.5 rounded bg-purple-900 text-xs">${c.drawsCount} / 2 ครั้ง</span></td>
+                                                <td class="p-3 font-mono font-bold text-orange-300">${phone}</td>
+                                                <td class="p-3">${data.name || '-'}</td>
+                                                <td class="p-3"><span class="px-2 py-0.5 rounded bg-purple-900 text-xs">${data.drawsCount} / 2 ครั้ง</span></td>
                                                 <td class="p-3 text-xs">
-                                                    ${c.history.map(h => `<div>🎁 ${h.rewardName} (${h.branchName})</div>`).join('')}
+                                                    ${(data.history || []).map(h => `<div>🎁 ${h.rewardName} (${h.branchName})</div>`).join('')}
                                                 </td>
                                                 <td class="p-3 text-center">
-                                                    ${isCentral ? `
-                                                        <button onclick="resetCustomerRights('${c.phone}')" class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-500 mr-1 font-bold">รีเซ็ตสิทธิ์ (0)</button>
-                                                        <button onclick="deleteCustomerRecord('${c.phone}')" class="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-500 font-bold">ลบข้อมูล</button>
-                                                    ` : `
-                                                        <span class="text-[11px] text-purple-400 italic">เฉพาะแอดมินกลาง (ดูได้อย่างเดียว)</span>
-                                                    `}
+                                                    <button onclick="resetCustomerRights('${phone}')" class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-500 mr-1">รีเซ็ตสิทธิ์ (0)</button>
+                                                    <button onclick="deleteCustomerRecord('${phone}')" class="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-500">ลบข้อมูล</button>
                                                 </td>
                                             </tr>
                                         `).join('')}
@@ -1152,24 +1160,24 @@
         async function resetCustomerRights(phone) {
             if (confirm(`ต้องการรีเซ็ตสิทธิ์ของเบอร์ ${phone} ให้กลับเป็น 0 (สิทธิ์เต็ม 2 ครั้ง) หรือไม่?`)) {
                 playSound('click');
+                delete customers[phone];
+                localStorage.setItem('ncn_customers', JSON.stringify(customers));
                 if (supabaseClient) {
                     await supabaseClient.from('draw_records').delete().eq('phone', phone);
-                    let { data } = await supabaseClient.from('draw_records').select('*');
-                    if (data) drawRecordsCache = data;
-                    renderCurrentView();
                 }
+                renderCurrentView();
             }
         }
 
         async function deleteCustomerRecord(phone) {
             if (confirm(`⚠️ ยืนยันการลบประวัติและสิทธิ์ทั้งหมดของเบอร์ ${phone}?`)) {
                 playSound('click');
+                delete customers[phone];
+                localStorage.setItem('ncn_customers', JSON.stringify(customers));
                 if (supabaseClient) {
                     await supabaseClient.from('draw_records').delete().eq('phone', phone);
-                    let { data } = await supabaseClient.from('draw_records').select('*');
-                    if (data) drawRecordsCache = data;
-                    renderCurrentView();
                 }
+                renderCurrentView();
             }
         }
 
