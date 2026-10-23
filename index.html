@@ -252,6 +252,8 @@
         async function loadSupabaseData() {
             if (!supabaseClient) return;
             try {
+                let oldRewardsCount = rewards ? rewards.length : 0;
+
                 let { data: rewData } = await supabaseClient.from('rewards').select('*');
                 if (rewData && rewData.length > 0) {
                     rewards = rewData.map(r => ({
@@ -294,7 +296,21 @@
                     customers = localCust;
                     localStorage.setItem('ncn_customers', JSON.stringify(customers));
                 }
-                renderCurrentView();
+
+                // ระบบ Smart Re-render ป้องกันการกระตุกในหน้าตั้งค่าสต็อกของแอดมิน
+                if (currentView === 'admin_dashboard' && adminTab === 'stock' && rewards.length === oldRewardsCount) {
+                    BRANCHES.forEach(b => {
+                        rewards.forEach(r => {
+                            if (document.getElementById(`stock-val-${b.id}-${r.id}`)) {
+                                updateStockDOM(b.id, r.id);
+                                updateActiveDOM(b.id, r.id);
+                            }
+                        });
+                    });
+                } else {
+                    renderCurrentView();
+                }
+
             } catch (err) {}
         }
 
@@ -353,10 +369,16 @@
 
         function renderHomeHTML() {
             const branchObj = BRANCHES.find(b => b.id === selectedBranch) || BRANCHES[0];
-            let totalBranchStock = 0;
-            (rewards || []).forEach(r => {
+            
+            // กรองมาเฉพาะรางวัลที่ถูกเปิดให้สุ่ม (active = true) ในสาขานี้เท่านั้น
+            const activeRewards = (rewards || []).filter(r => {
                 const inv = branchInventories[selectedBranch]?.[r.id];
-                if (inv && inv.active) totalBranchStock += inv.stock;
+                return inv && inv.active === true;
+            });
+
+            let totalBranchStock = 0;
+            activeRewards.forEach(r => {
+                totalBranchStock += (branchInventories[selectedBranch][r.id].stock || 0);
             });
 
             return `
@@ -391,21 +413,25 @@
                             <span class="text-xs text-purple-400">พร้อมแจก ${totalBranchStock} ชิ้น (แตะที่รูปเพื่อดูรายละเอียด)</span>
                         </div>
                         <div class="marquee-container py-2 cursor-pointer">
-                            <div class="marquee-track">
-                                ${(rewards || []).concat(rewards || []).map(r => {
-                                    const inv = branchInventories[selectedBranch]?.[r.id] || { stock: 15, active: true };
-                                    const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
-                                    return `
-                                        <div onclick="showRewardDetail('${r.id}')" class="flex-shrink-0 w-32 bg-purple-900/40 border border-purple-700/50 rounded-xl p-3 text-center hover:border-orange-500 transition-all">
-                                            <div class="text-3xl mb-1 flex items-center justify-center h-10">
-                                                ${isImg ? `<img src="${r.image}" class="w-10 h-10 object-cover rounded-lg">` : r.image}
+                            ${activeRewards.length === 0 ? 
+                                `<div class="w-full text-center text-purple-400 py-4 text-xs font-semibold"><i class="fa-solid fa-box-open mr-1"></i> ขณะนี้ไม่มีของรางวัลที่เปิดให้สุ่มในสาขานี้</div>` 
+                                : 
+                                `<div class="marquee-track">
+                                    ${activeRewards.concat(activeRewards).concat(activeRewards).map(r => {
+                                        const inv = branchInventories[selectedBranch]?.[r.id] || { stock: 0, active: true };
+                                        const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
+                                        return `
+                                            <div onclick="showRewardDetail('${r.id}')" class="flex-shrink-0 w-32 bg-purple-900/40 border border-purple-700/50 rounded-xl p-3 text-center hover:border-orange-500 transition-all">
+                                                <div class="text-3xl mb-1 flex items-center justify-center h-10">
+                                                    ${isImg ? `<img src="${r.image}" class="w-10 h-10 object-cover rounded-lg">` : r.image}
+                                                </div>
+                                                <div class="text-xs font-semibold text-white truncate">${r.name}</div>
+                                                <div class="text-[10px] text-orange-300 mt-1">เหลือ ${inv.stock} ชิ้น</div>
                                             </div>
-                                            <div class="text-xs font-semibold text-white truncate">${r.name}</div>
-                                            <div class="text-[10px] text-orange-300 mt-1">เหลือ ${inv.stock} ชิ้น</div>
-                                        </div>
-                                    `;
-                                }).join('')}
-                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>`
+                            }
                         </div>
                     </div>
 
@@ -908,6 +934,34 @@
             `;
         }
 
+        function updateStockDOM(branchId, rewardId) {
+            const inv = branchInventories[branchId]?.[rewardId];
+            if (!inv) return;
+            const spanElem = document.getElementById(`stock-val-${branchId}-${rewardId}`);
+            const cardElem = document.getElementById(`card-stock-${branchId}-${rewardId}`);
+            if (spanElem) {
+                spanElem.textContent = inv.stock + ' ชิ้น';
+                spanElem.className = inv.stock > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
+            }
+            if (cardElem) {
+                cardElem.className = `bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}`;
+            }
+        }
+
+        function updateActiveDOM(branchId, rewardId) {
+            const inv = branchInventories[branchId]?.[rewardId];
+            if (!inv) return;
+            const btn = document.getElementById(`btn-active-${branchId}-${rewardId}`);
+            const card = document.getElementById(`card-stock-${branchId}-${rewardId}`);
+            if (btn) {
+                btn.textContent = inv.active ? 'เปิดสุ่ม' : 'ปิดการสุ่ม';
+                btn.className = `px-2 py-0.5 rounded text-[10px] ${inv.active ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`;
+            }
+            if (card) {
+                card.className = `bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}`;
+            }
+        }
+
         function openStockModal(branchId, rewardId) {
             playSound('click');
             const inv = branchInventories[branchId][rewardId];
@@ -944,38 +998,12 @@
             });
         }
 
-        function updateStockDOM(branchId, rewardId) {
-            const inv = branchInventories[branchId][rewardId];
-            const spanElem = document.getElementById(`stock-val-${branchId}-${rewardId}`);
-            const cardElem = document.getElementById(`card-stock-${branchId}-${rewardId}`);
-            if (spanElem) {
-                spanElem.textContent = inv.stock + ' ชิ้น';
-                spanElem.className = inv.stock > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
-            }
-            if (cardElem) {
-                cardElem.className = `bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}`;
-            }
-        }
-
         async function updateStock(branchId, rewardId, amount) {
             playSound('click');
             let inv = branchInventories[branchId][rewardId];
             inv.stock = Math.max(0, inv.stock + amount);
             updateStockDOM(branchId, rewardId);
             await saveRewardToSupabase(rewardId);
-        }
-
-        function updateActiveDOM(branchId, rewardId) {
-            const inv = branchInventories[branchId][rewardId];
-            const btn = document.getElementById(`btn-active-${branchId}-${rewardId}`);
-            const card = document.getElementById(`card-stock-${branchId}-${rewardId}`);
-            if (btn) {
-                btn.textContent = inv.active ? 'เปิดสุ่ม' : 'ปิดการสุ่ม';
-                btn.className = `px-2 py-0.5 rounded text-[10px] ${inv.active ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`;
-            }
-            if (card) {
-                card.className = `bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}`;
-            }
         }
 
         async function toggleBranchReward(branchId, rewardId) {
