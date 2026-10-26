@@ -449,7 +449,7 @@
                             </div>
                         </div>
 
-                        <button type="submit" class="w-full py-4 mt-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-purple-950 font-bold text-lg hover:from-orange-400 hover:to-amber-400 glow-orange transition-all transform hover:scale-[1.01]">
+                        <button id="btn-submit" type="submit" class="w-full py-4 mt-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-purple-950 font-bold text-lg hover:from-orange-400 hover:to-amber-400 glow-orange transition-all transform hover:scale-[1.01] flex justify-center items-center">
                             เข้าสู่กิจกรรมลุ้นรางวัล 🎃 ✨
                         </button>
                     </form>
@@ -503,17 +503,37 @@
                     return;
                 }
 
+                // เปลี่ยนปุ่มเป็นสถานะโหลด เพื่อดึงข้อมูลจากคลาวด์สดๆ
+                const btnSubmit = document.getElementById('btn-submit');
+                const originalText = btnSubmit.innerHTML;
+                btnSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังตรวจสอบสิทธิ์จากส่วนกลาง...';
+                btnSubmit.disabled = true;
+                btnSubmit.classList.add('opacity-70', 'cursor-not-allowed');
+
                 let localDraws = customers[phone] ? customers[phone].drawsCount : 0;
                 let supaDraws = 0;
                 
                 if (supabaseClient) {
                     try {
                         let { data, error } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
-                        if (data) supaDraws = data.length;
+                        if (data) {
+                            supaDraws = data.length;
+                            // ซิงก์ประวัติลงเครื่องลูกค้าด้วยเลยเผื่อลูกค้าเปลี่ยนเครื่อง
+                            if (!customers[phone]) customers[phone] = { name: name, drawsCount: 0, history: [] };
+                            customers[phone].drawsCount = supaDraws;
+                            customers[phone].history = data.map(r => ({
+                                rewardName: r.reward_name, branchName: r.branch_name, time: r.time
+                            }));
+                        }
                     } catch (e) {}
                 }
                 
                 let finalDrawsCount = Math.max(localDraws, supaDraws);
+
+                // คืนสถานะปุ่ม
+                btnSubmit.innerHTML = originalText;
+                btnSubmit.disabled = false;
+                btnSubmit.classList.remove('opacity-70', 'cursor-not-allowed');
 
                 if (finalDrawsCount >= 2) {
                     let historyHTML = getCustomerHistoryHTML(phone);
@@ -552,7 +572,11 @@
 
                     <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
                         ${[1, 2, 3, 4, 5, 6].map(boxNum => `
-                            <div onclick="openBox(${boxNum})" class="card-glass p-6 rounded-2xl cursor-pointer hover:border-orange-500 hover:glow-orange transition-all transform hover:-translate-y-1 group">
+                            <div onclick="openBox(${boxNum})" class="card-glass p-6 rounded-2xl cursor-pointer hover:border-orange-500 hover:glow-orange transition-all transform hover:-translate-y-1 group relative overflow-hidden">
+                                <div id="box-loader-${boxNum}" class="absolute inset-0 bg-black/60 z-10 hidden flex-col items-center justify-center">
+                                    <i class="fa-solid fa-spinner fa-spin text-2xl text-orange-500 mb-2"></i>
+                                    <span class="text-xs text-white">กำลังสุ่ม...</span>
+                                </div>
                                 <div class="text-5xl mb-3 animate-pulse-slow group-hover:scale-110 transition-transform">🎁</div>
                                 <div class="text-sm font-bold text-orange-300">กล่องลึกลับ #${boxNum}</div>
                                 <div class="text-xs text-purple-400 mt-1">แตะเพื่อเปิดกล่อง</div>
@@ -570,6 +594,11 @@
         async function openBox(boxNum) {
             playSound('magic');
             
+            // โชว์แอนิเมชันโหลดก่อนดึงคลาวด์เพื่อความชัวร์ 100% ว่าไม่ได้สุ่มพร้อมกัน 2 เครื่อง
+            const loader = document.getElementById(`box-loader-${boxNum}`);
+            if (loader) loader.classList.remove('hidden');
+            if (loader) loader.classList.add('flex');
+
             let localDraws = customers[customerData.phone] ? customers[customerData.phone].drawsCount : 0;
             let supaDraws = 0;
             if (supabaseClient) {
@@ -578,6 +607,9 @@
                     if (data) supaDraws = data.length;
                 } catch(e) {}
             }
+
+            if (loader) loader.classList.add('hidden');
+            if (loader) loader.classList.remove('flex');
 
             if (Math.max(localDraws, supaDraws) >= 2) {
                 let historyHTML = getCustomerHistoryHTML(customerData.phone);
@@ -636,12 +668,10 @@
             });
             localStorage.setItem('ncn_customers', JSON.stringify(customers));
 
-            // [อัปเดตสำคัญ] เพิ่มการส่ง ID ให้ Supabase บันทึกข้อมูล
+            // บันทึกขึ้นคลาวด์ พร้อมแจ้งเตือนถ้าเกิดข้อผิดพลาด
             if (supabaseClient) {
                 try {
-                    let newDrawId = 'd_' + Date.now().toString() + Math.floor(Math.random() * 1000); // สร้าง Text ID ให้ฐานข้อมูลยอมรับ
                     const { error } = await supabaseClient.from('draw_records').insert([{
-                        id: newDrawId,
                         phone: customerData.phone,
                         name: customerData.name,
                         branch_id: selectedBranch,
@@ -649,8 +679,13 @@
                         reward_name: wonReward.name,
                         time: timeStr
                     }]);
-                    if (error) console.error("Supabase Save Error:", error.message);
-                } catch (e) {}
+                    
+                    if (error) {
+                        alert("⚠️ ฐานข้อมูลปฏิเสธการรับข้อมูล (กรุณาปลดล็อค RLS ใน Supabase ตามคำแนะนำ)\nError: " + error.message);
+                    }
+                } catch (e) {
+                    alert("⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อ: " + e.message);
+                }
             }
 
             setTimeout(() => {
