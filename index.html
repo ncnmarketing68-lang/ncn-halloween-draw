@@ -283,7 +283,6 @@
                         if (!freshCust[phone]) {
                             freshCust[phone] = { name: r.name, drawsCount: 0, history: [] };
                         }
-                        // เช็คป้องกันข้อมูลซ้ำซ้อน
                         let exists = freshCust[phone].history.some(h => h.rewardName === r.reward_name && h.branchName === r.branch_name && h.id === r.id);
                         if (!exists) {
                             freshCust[phone].drawsCount += 1;
@@ -529,7 +528,6 @@
                     } catch (e) {}
                 }
 
-                // อัปเดตข้อมูลลูกค้าล่าสุดจากคลาวด์ตรงๆ
                 customers[phone] = { name: name, drawsCount: supaDraws, history: supaHistory };
                 localStorage.setItem('ncn_customers', JSON.stringify(customers));
 
@@ -577,7 +575,7 @@
                             <div onclick="openBox(${boxNum})" class="card-glass p-6 rounded-2xl cursor-pointer hover:border-orange-500 hover:glow-orange transition-all transform hover:-translate-y-1 group relative overflow-hidden">
                                 <div id="box-loader-${boxNum}" class="absolute inset-0 bg-black/60 z-10 hidden flex-col items-center justify-center">
                                     <i class="fa-solid fa-spinner fa-spin text-2xl text-orange-500 mb-2"></i>
-                                    <span class="text-xs text-white">กำลังสุ่ม...</span>
+                                    <span class="text-xs text-white">กำลังตรวจสอบสิทธิ์...</span>
                                 </div>
                                 <div class="text-5xl mb-3 animate-pulse-slow group-hover:scale-110 transition-transform">🎁</div>
                                 <div class="text-sm font-bold text-orange-300">กล่องลึกลับ #${boxNum}</div>
@@ -600,11 +598,20 @@
             if (loader) loader.classList.remove('hidden');
             if (loader) loader.classList.add('flex');
 
+            // [อัปเดตสำคัญ] เช็คสิทธิ์จากคลาวด์แบบสดๆ ทันที ก่อนเปิดกล่องสุ่มข้ามเครื่อง
             let supaDraws = 0;
             if (supabaseClient) {
                 try {
                     let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', customerData.phone);
-                    if (data) supaDraws = data.length;
+                    if (data) {
+                        supaDraws = data.length;
+                        customers[customerData.phone] = {
+                            name: customerData.name,
+                            drawsCount: supaDraws,
+                            history: data.map(r => ({ id: r.id, rewardName: r.reward_name, branchName: r.branch_name, time: r.time || 'ไม่ระบุ' }))
+                        };
+                        localStorage.setItem('ncn_customers', JSON.stringify(customers));
+                    }
                 } catch(e) {}
             }
 
@@ -613,7 +620,7 @@
 
             if (supaDraws >= 2) {
                 let historyHTML = getCustomerHistoryHTML(customerData.phone);
-                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup' + historyHTML, () => { goToHome(); });
+                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว (ไม่สามารถสุ่มซ้ำข้ามเครื่องได้)<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup' + historyHTML, () => { goToHome(); });
                 return;
             }
 
@@ -673,7 +680,6 @@
                     if (error) {
                         alert("⚠️ แจ้งเตือนจากฐานข้อมูล:\n" + error.message);
                     } else {
-                        // ดึงข้อมูลใหม่ทันทีหลังบันทึกสำเร็จ
                         let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', customerData.phone);
                         if (data) {
                             customers[customerData.phone] = {
