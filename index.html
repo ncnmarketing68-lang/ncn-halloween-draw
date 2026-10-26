@@ -1,36 +1,1226 @@
-async function recoverLostData() {
-    let localCust = JSON.parse(localStorage.getItem('ncn_customers')) || {};
-    let recordsToInsert = [];
-    
-    for (let phone in localCust) {
-        let cust = localCust[phone];
-        if (cust.history && cust.history.length > 0) {
-            cust.history.forEach(h => {
-                recordsToInsert.push({
-                    id: 'rec_recover_' + Date.now().toString() + Math.floor(Math.random() * 1000),
-                    phone: phone,
-                    name: cust.name,
-                    branch_id: 'unknown', 
-                    branch_name: h.branchName,
-                    reward_name: h.rewardName,
-                    time: h.time
-                });
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NCN Medgroup Halloween Lucky Draw 🎃👻</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Sarabun -->
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Supabase JS SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { font-family: 'Sarabun', sans-serif; background-color: #0f071e; color: #f3f4f6; }
+        .halloween-gradient { background: linear-gradient(135deg, #2a1b4e 0%, #150a24 100%); }
+        .card-glass { background: rgba(30, 20, 50, 0.85); backdrop-filter: blur(10px); border: 1px solid rgba(249, 115, 22, 0.3); }
+        .glow-orange { box-shadow: 0 0 25px rgba(249, 115, 22, 0.4); }
+        .glow-purple { box-shadow: 0 0 25px rgba(168, 85, 247, 0.4); }
+        @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+        .animate-float { animation: float 3s ease-in-out infinite; }
+        @keyframes pulse-slow { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.05); opacity: 0.9; } }
+        .animate-pulse-slow { animation: pulse-slow 2s infinite; }
+        .marquee-container { overflow: hidden; width: 100%; display: flex; }
+        .marquee-track { display: flex; gap: 1rem; width: max-content; animation: marquee 25s linear infinite; }
+        .marquee-track:hover { animation-play-state: paused; }
+        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #150a24; }
+        ::-webkit-scrollbar-thumb { background: #f97316; border-radius: 4px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between halloween-gradient relative overflow-x-hidden">
+
+    <div class="fixed inset-0 pointer-events-none z-0 overflow-hidden opacity-30">
+        <div class="absolute top-10 left-10 text-4xl animate-float">👻</div>
+        <div class="absolute top-1/4 right-12 text-4xl animate-float" style="animation-delay: 1s;">🎃</div>
+        <div class="absolute bottom-20 left-1/4 text-3xl animate-float" style="animation-delay: 2s;">🦇</div>
+        <div class="absolute bottom-10 right-1/3 text-3xl animate-float" style="animation-delay: 1.5s;">⭐</div>
+    </div>
+
+    <header class="w-full py-4 px-6 card-glass border-b border-orange-500/20 flex justify-between items-center z-20">
+        <div class="flex items-center space-x-3 cursor-pointer" onclick="goToHome()">
+            <div class="w-10 h-10 rounded-full bg-orange-600 flex items-center justify-center glow-orange text-xl">🎃</div>
+            <div>
+                <h1 class="font-bold text-lg text-orange-400">NCN Medgroup</h1>
+                <p class="text-xs text-purple-300">HALLOWEEN LUCKY DRAW 👻✨</p>
+            </div>
+        </div>
+        <div class="flex items-center space-x-2 text-xs text-purple-300">
+            <span class="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse"></span>
+            <span>ระบบซิงก์คลาวด์ Supabase Realtime</span>
+        </div>
+    </header>
+
+    <main id="app-container" class="flex-grow container mx-auto px-4 py-8 max-w-4xl z-10 flex flex-col items-center justify-center">
+    </main>
+
+    <footer class="w-full py-4 text-center text-xs text-purple-400/60 z-20 border-t border-purple-900/40">
+        <p>© NCN Medgroup • ระบบสุ่มของรางวัลออนไลน์ 7 สาขา (ซิงก์เรียลไทม์)</p>
+        <p class="mt-1"><a href="javascript:void(0)" onclick="openAdminLogin()" class="hover:text-orange-400 underline">เข้าสู่ระบบผู้ดูแลระบบ (Admin)</a></p>
+    </footer>
+
+    <script>
+        const SUPABASE_URL = 'https://stbzvohtzmifwjfaocli.supabase.co';
+        const SUPABASE_ANON_KEY = 'sb_publishable_8EOHwzGLMz5pHVpKPyN9og_NQDH0WzN';
+        let supabaseClient = null;
+        try {
+            if (window.supabase) {
+                supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+            }
+        } catch (err) {}
+
+        let audioCtx = null;
+        let isBgmPlaying = false;
+        let bgmInterval = null;
+
+        const BRANCHES = [
+            { id: 'lansaka', name: 'วีแคร์ ลานสกา' },
+            { id: 'nantachon1', name: 'นันท์ชนกฟาร์มา สาขาที่ 1' },
+            { id: 'thaiwatsadu', name: 'ทีพี เฮลท์ สาขาไทวัสดุ' },
+            { id: 'kokbok', name: 'วีแคร์ โคกบก' },
+            { id: 'khaokhao', name: 'วีแคร์ เขาขาว' },
+            { id: 'thaphae', name: 'วีแคร์ ท่าแพ' },
+            { id: 'chanoknan', name: 'ชนกนันท์เภสัช' }
+        ];
+
+        const defaultRewards = [
+            { id: 'r1', name: 'แก้วเชค คละสี', image: '🥤', weight: 20 },
+            { id: 'r2', name: 'ร่ม UV คละสี', image: '🌂', weight: 20 },
+            { id: 'r3', name: 'ผ้าขนหนู คละแบบ', image: '🧺', weight: 20 },
+            { id: 'r4', name: 'เสื้อกันฝน คละสี', image: '🧥', weight: 15 },
+            { id: 'r5', name: 'ตะกร้าผ้า คละสี', image: '🧺', weight: 15 },
+            { id: 'r6', name: 'กระเป๋ากระสอบ คละแบบ', image: '👜', weight: 10 }
+        ];
+
+        let rewards = JSON.parse(localStorage.getItem('ncn_rewards_cache')) || defaultRewards;
+        let branchInventories = JSON.parse(localStorage.getItem('ncn_inv_cache')) || {};
+        BRANCHES.forEach(b => {
+            if (!branchInventories[b.id]) branchInventories[b.id] = {};
+            rewards.forEach(r => {
+                if (!branchInventories[b.id][r.id]) {
+                    branchInventories[b.id][r.id] = { stock: 15, active: true };
+                }
+            });
+        });
+
+        let customers = JSON.parse(localStorage.getItem('ncn_customers')) || {};
+        let currentView = 'home';
+        let selectedBranch = BRANCHES[0].id;
+        let customerData = { name: '', phone: '' };
+        let currentAdminRole = null;
+        let adminTab = 'stock';
+
+        function getCustomerHistoryHTML(phone) {
+            let custRecord = customers[phone];
+            if (!custRecord || !custRecord.history || custRecord.history.length === 0) return '';
+            
+            let html = '<div class="mt-4 text-left bg-purple-900/40 p-3 rounded-xl border border-purple-700/50">';
+            html += '<div class="text-xs font-bold text-orange-300 mb-2"><i class="fa-solid fa-clock-rotate-left mr-1"></i> ประวัติการรับรางวัลของคุณ:</div>';
+            html += '<div class="space-y-2 max-h-40 overflow-y-auto pr-1">';
+            
+            custRecord.history.forEach((h, index) => {
+                html += `
+                    <div class="text-xs text-purple-200 bg-purple-950/60 p-2.5 rounded-lg border border-purple-800/40">
+                        <div class="font-bold text-white mb-1">🎁 ครั้งที่ ${index + 1}: ${h.rewardName}</div>
+                        <div class="text-[10px] text-purple-300 flex items-center mb-0.5"><i class="fa-solid fa-location-dot w-4 text-center mr-1"></i> ${h.branchName}</div>
+                        <div class="text-[10px] text-orange-300 flex items-center"><i class="fa-solid fa-clock w-4 text-center mr-1"></i> ${h.time}</div>
+                    </div>
+                `;
+            });
+            
+            html += '</div></div>';
+            return html;
+        }
+
+        function showCustomAlert(title, message, callback = null) {
+            playSound('error');
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 md:p-8 rounded-2xl max-w-sm w-full text-center glow-orange relative animate-pulse-slow">
+                    <div class="text-6xl mb-3 animate-bounce">🎃</div>
+                    <h3 class="text-xl font-bold text-orange-400 mb-2">${title}</h3>
+                    <div class="text-sm text-purple-200 mb-6 leading-relaxed">${message}</div>
+                    <button id="alert-ok-btn" class="w-full py-3 bg-gradient-to-r from-orange-500 to-amber-500 text-purple-950 font-bold rounded-xl hover:from-orange-400 hover:to-amber-400 glow-orange transition-all">เข้าใจแล้ว ✨</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            modal.querySelector('#alert-ok-btn').addEventListener('click', () => {
+                playSound('click');
+                modal.remove();
+                if (callback) callback();
             });
         }
-    }
-    
-    if (recordsToInsert.length > 0) {
-        console.log("กำลังกู้ข้อมูลขึ้นระบบจำนวน: " + recordsToInsert.length + " รายการ...");
-        const { error } = await supabaseClient.from('draw_records').insert(recordsToInsert);
-        if (error) {
-            console.error("เกิดข้อผิดพลาด:", error);
-            alert("กู้ข้อมูลไม่สำเร็จ กรุณาดู Error ใน Console");
-        } else {
-            console.log("✅ กู้ข้อมูลสำเร็จ!");
-            alert("กู้ข้อมูลขึ้นระบบสำเร็จแล้ว! ข้อมูลจะไปโชว์ในเครื่องอื่นด้วยแล้วครับ");
+
+        function initAudio() {
+            try {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                if (!isBgmPlaying) { startSuperFunBgm(); isBgmPlaying = true; }
+            } catch (e) {}
         }
-    } else {
-        alert("ไม่พบข้อมูลตกค้างในเครื่องนี้ครับ");
-    }
-}
-recoverLostData();
+
+        function playSound(type) {
+            try {
+                initAudio();
+                if (!audioCtx) return;
+                const now = audioCtx.currentTime;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                if (type === 'click') {
+                    osc.frequency.setValueAtTime(400, now);
+                    gain.gain.setValueAtTime(0.1, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                    osc.start(now); osc.stop(now + 0.1);
+                } else if (type === 'magic') {
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(300, now);
+                    osc.frequency.exponentialRampToValueAtTime(800, now + 0.5);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.6);
+                    osc.start(now); osc.stop(now + 0.6);
+                } else if (type === 'win') {
+                    [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                        const o = audioCtx.createOscillator();
+                        const g = audioCtx.createGain();
+                        o.connect(g); g.connect(audioCtx.destination);
+                        o.frequency.setValueAtTime(freq, now + i * 0.1);
+                        g.gain.setValueAtTime(0.15, now + i * 0.1);
+                        g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.3);
+                        o.start(now + i * 0.1); o.stop(now + i * 0.1 + 0.3);
+                    });
+                } else if (type === 'error') {
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(150, now);
+                    osc.frequency.setValueAtTime(100, now + 0.15);
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+                    osc.start(now); osc.stop(now + 0.3);
+                }
+            } catch (e) {}
+        }
+
+        function startSuperFunBgm() {
+            if (bgmInterval) return;
+            const notes = [523.25, 587.33, 659.25, 783.99, 880.00, 783.99, 659.25, 587.33, 523.25, 659.25, 783.99, 1046.50];
+            let step = 0;
+            bgmInterval = setInterval(() => {
+                if (!audioCtx || audioCtx.state !== 'running') return;
+                try {
+                    const now = audioCtx.currentTime;
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(notes[step % notes.length], now);
+                    gain.gain.setValueAtTime(0.025, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+                    osc.connect(gain); gain.connect(audioCtx.destination);
+                    osc.start(now); osc.stop(now + 0.18);
+                    step++;
+                } catch (e) {}
+            }, 200);
+        }
+
+        function compressImage(file, callback) {
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    const canvas = document.createElement('canvas');
+                    const maxSize = 250;
+                    let width = img.width, height = img.height;
+                    if (width > height) {
+                        if (width > maxSize) { height *= maxSize / width; width = maxSize; }
+                    } else {
+                        if (height > maxSize) { width *= maxSize / height; height = maxSize; }
+                    }
+                    canvas.width = width; canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    callback(canvas.toDataURL('image/jpeg', 0.8));
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        async function loadSupabaseData() {
+            if (!supabaseClient) return;
+            try {
+                let oldRewardsCount = rewards ? rewards.length : 0;
+
+                let { data: rewData } = await supabaseClient.from('rewards').select('*');
+                if (rewData && rewData.length > 0) {
+                    rewards = rewData.map(r => ({
+                        id: r.id, name: r.name, image: r.image, weight: 15
+                    }));
+                    branchInventories = {};
+                    BRANCHES.forEach(b => {
+                        branchInventories[b.id] = {};
+                        rewData.forEach(r => {
+                            const sMap = r.stock_map || {};
+                            const aMap = r.active_map || {};
+                            branchInventories[b.id][r.id] = {
+                                stock: sMap[b.id] !== undefined ? sMap[b.id] : 15,
+                                active: aMap[b.id] !== undefined ? aMap[b.id] : true
+                            };
+                        });
+                    });
+                    localStorage.setItem('ncn_rewards_cache', JSON.stringify(rewards));
+                    localStorage.setItem('ncn_inv_cache', JSON.stringify(branchInventories));
+                }
+
+                let { data: recData, error } = await supabaseClient.from('draw_records').select('*');
+                if (!error && recData) {
+                    let localCust = JSON.parse(localStorage.getItem('ncn_customers')) || {};
+                    recData.forEach(r => {
+                        let phone = r.phone;
+                        if (!localCust[phone]) {
+                            localCust[phone] = { name: r.name, drawsCount: 0, history: [] };
+                        }
+                        let exists = localCust[phone].history.some(h => h.time === r.time && h.rewardName === r.reward_name);
+                        if (!exists) {
+                            localCust[phone].drawsCount += 1;
+                            localCust[phone].history.push({
+                                rewardName: r.reward_name || 'ไม่ระบุ',
+                                branchName: r.branch_name,
+                                time: r.time || ''
+                            });
+                        }
+                    });
+                    customers = localCust;
+                    localStorage.setItem('ncn_customers', JSON.stringify(customers));
+                }
+
+                if (currentView === 'admin_dashboard' && adminTab === 'stock' && rewards.length === oldRewardsCount) {
+                    BRANCHES.forEach(b => {
+                        rewards.forEach(r => {
+                            if (document.getElementById(`stock-val-${b.id}-${r.id}`)) {
+                                updateStockDOM(b.id, r.id);
+                                updateActiveDOM(b.id, r.id);
+                            }
+                        });
+                    });
+                } else {
+                    renderCurrentView();
+                }
+
+            } catch (err) {}
+        }
+
+        async function saveRewardToSupabase(rewardId) {
+            localStorage.setItem('ncn_rewards_cache', JSON.stringify(rewards));
+            localStorage.setItem('ncn_inv_cache', JSON.stringify(branchInventories));
+            if (!supabaseClient) return;
+
+            const reward = rewards.find(r => r.id === rewardId);
+            if (!reward) return;
+
+            let stock_map = {}, active_map = {};
+            BRANCHES.forEach(b => {
+                stock_map[b.id] = branchInventories[b.id]?.[rewardId]?.stock ?? 15;
+                active_map[b.id] = branchInventories[b.id]?.[rewardId]?.active ?? true;
+            });
+
+            try {
+                await supabaseClient.from('rewards').upsert({
+                    id: reward.id, name: reward.name, image: reward.image, stock_map, active_map
+                });
+            } catch (err) {}
+        }
+
+        if (supabaseClient) {
+            supabaseClient.channel('public:draw_records').on('postgres_changes', { event: '*', schema: 'public', table: 'draw_records' }, () => { loadSupabaseData(); }).subscribe();
+            supabaseClient.channel('public:rewards').on('postgres_changes', { event: '*', schema: 'public', table: 'rewards' }, () => { loadSupabaseData(); }).subscribe();
+        }
+
+        function renderCurrentView() {
+            const container = document.getElementById('app-container');
+            if (!container) return;
+
+            const scrollY = window.scrollY;
+
+            if (currentView === 'home') {
+                container.innerHTML = renderHomeHTML();
+                attachHomeEvents();
+            } else if (currentView === 'draw') {
+                container.innerHTML = renderDrawHTML();
+            } else if (currentView === 'admin_login') {
+                container.innerHTML = renderAdminLoginHTML();
+                attachAdminLoginEvents();
+            } else if (currentView === 'admin_dashboard') {
+                container.innerHTML = renderAdminDashboardHTML();
+            }
+
+            window.scrollTo(0, scrollY);
+        }
+
+        function goToHome() {
+            playSound('click');
+            currentView = 'home';
+            renderCurrentView();
+        }
+
+        function renderHomeHTML() {
+            const branchObj = BRANCHES.find(b => b.id === selectedBranch) || BRANCHES[0];
+            
+            const activeRewards = (rewards || []).filter(r => {
+                const inv = branchInventories[selectedBranch]?.[r.id];
+                return inv && inv.active === true;
+            });
+
+            let totalBranchStock = 0;
+            activeRewards.forEach(r => {
+                totalBranchStock += (branchInventories[selectedBranch][r.id].stock || 0);
+            });
+
+            return `
+                <div class="w-full card-glass p-6 md:p-8 rounded-2xl glow-orange relative">
+                    <div class="absolute top-4 left-4 text-2xl">🍬</div>
+                    <div class="absolute top-4 right-4 text-2xl">🎁</div>
+                    
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 mx-auto mb-2 rounded-2xl bg-orange-500/20 flex items-center justify-center text-3xl glow-orange animate-bounce">🎁</div>
+                        <h2 class="text-2xl md:text-3xl font-bold text-orange-400">กิจกรรมสุ่มของรางวัลสุดพิเศษ</h2>
+                        <p class="text-purple-300 text-sm mt-1">🎃 NCN Medgroup 👻</p>
+                    </div>
+
+                    <div class="mb-6">
+                        <label class="block text-sm font-semibold text-orange-300 mb-2">
+                            <i class="fa-solid fa-store mr-2"></i> 1. เลือกร้านสาขาที่คุณเข้ารับบริการ (ของรางวัลแยกตามสาขา)
+                        </label>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                            ${BRANCHES.map(b => `
+                                <button type="button" onclick="selectBranch('${b.id}')" class="p-3 rounded-xl text-sm font-medium transition-all text-left truncate ${selectedBranch === b.id ? 'bg-orange-600 text-white glow-orange font-bold' : 'bg-purple-950/60 text-purple-200 hover:bg-purple-900/60 border border-purple-800/50'}">
+                                    <i class="fa-solid fa-location-dot mr-1"></i> ${b.name}
+                                </button>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="mb-6 bg-purple-950/40 p-4 rounded-xl border border-purple-800/40">
+                        <div class="flex justify-between items-center mb-2">
+                            <span class="text-xs font-semibold text-orange-300">
+                                <i class="fa-solid fa-gift mr-1"></i> ของรางวัลในกล่องสาขา: ${branchObj.name}
+                            </span>
+                            <span class="text-xs text-purple-400">พร้อมแจก ${totalBranchStock} ชิ้น (แตะที่รูปเพื่อดูรายละเอียด)</span>
+                        </div>
+                        <div class="marquee-container py-2 cursor-pointer">
+                            ${activeRewards.length === 0 ? 
+                                `<div class="w-full text-center text-purple-400 py-4 text-xs font-semibold"><i class="fa-solid fa-box-open mr-1"></i> ขณะนี้ไม่มีของรางวัลที่เปิดให้สุ่มในสาขานี้</div>` 
+                                : 
+                                `<div class="marquee-track">
+                                    ${activeRewards.concat(activeRewards).concat(activeRewards).map(r => {
+                                        const inv = branchInventories[selectedBranch]?.[r.id] || { stock: 0, active: true };
+                                        const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
+                                        return `
+                                            <div onclick="showRewardDetail('${r.id}')" class="flex-shrink-0 w-32 bg-purple-900/40 border border-purple-700/50 rounded-xl p-3 text-center hover:border-orange-500 transition-all">
+                                                <div class="text-3xl mb-1 flex items-center justify-center h-10">
+                                                    ${isImg ? `<img src="${r.image}" class="w-10 h-10 object-cover rounded-lg">` : r.image}
+                                                </div>
+                                                <div class="text-xs font-semibold text-white truncate">${r.name}</div>
+                                                <div class="text-[10px] text-orange-300 mt-1">เหลือ ${inv.stock} ชิ้น</div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>`
+                            }
+                        </div>
+                    </div>
+
+                    <form id="customer-form" class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-orange-300 mb-1">
+                                    <i class="fa-solid fa-user mr-2"></i> 2. ชื่อ-นามสกุล หรือชื่อเล่น
+                                </label>
+                                <input type="text" id="cust-name" required placeholder="เช่น คุณสมชาย / น้องมายด์" value="${customerData.name}" oninput="customerData.name = this.value" class="w-full px-4 py-3 rounded-xl bg-purple-950/80 border border-purple-700 text-white focus:outline-none focus:border-orange-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-orange-300 mb-1">
+                                    <i class="fa-solid fa-phone mr-2"></i> 3. เบอร์โทรศัพท์มือถือ (10 หลัก)
+                                </label>
+                                <input type="tel" id="cust-phone" maxlength="10" required placeholder="08XXXXXXXX" value="${customerData.phone}" oninput="customerData.phone = this.value" class="w-full px-4 py-3 rounded-xl bg-purple-950/80 border border-purple-700 text-white focus:outline-none focus:border-orange-500">
+                            </div>
+                        </div>
+
+                        <button type="submit" class="w-full py-4 mt-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 text-purple-950 font-bold text-lg hover:from-orange-400 hover:to-amber-400 glow-orange transition-all transform hover:scale-[1.01]">
+                            เข้าสู่กิจกรรมลุ้นรางวัล 🎃 ✨
+                        </button>
+                    </form>
+
+                    <div class="text-center mt-4 text-xs text-purple-300">
+                        <i class="fa-solid fa-shield-halved mr-1"></i> สิทธิ์จำกัดสูงสุด 2 ครั้งต่อเบอร์โทรศัพท์ (รวมทุกสาขา หากใช้สิทธิ์ครบแล้วไม่สามารถสุ่มซ้ำได้)
+                    </div>
+                </div>
+            `;
+        }
+
+        function selectBranch(id) {
+            playSound('click');
+            selectedBranch = id;
+            renderCurrentView();
+        }
+
+        function showRewardDetail(rewardId) {
+            playSound('click');
+            const r = rewards.find(item => item.id === rewardId);
+            if (!r) return;
+            const inv = branchInventories[selectedBranch]?.[r.id] || { stock: 15 };
+            const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 rounded-2xl max-w-sm w-full text-center glow-orange relative">
+                    <div class="text-6xl mb-3 flex items-center justify-center h-24">
+                        ${isImg ? `<img src="${r.image}" class="w-24 h-24 object-cover rounded-xl shadow-lg">` : r.image}
+                    </div>
+                    <h3 class="text-xl font-bold text-orange-400 mb-1">${r.name}</h3>
+                    <p class="text-sm text-purple-200 mb-4">จำนวนสต็อกคงเหลือในสาขา: <span class="text-orange-300 font-bold">${inv.stock} ชิ้น</span></p>
+                    <button onclick="this.closest('.fixed').remove()" class="w-full py-2 bg-orange-600 text-white rounded-xl font-bold hover:bg-orange-500">ปิดหน้าต่าง</button>
+                </div>
+            `;
+            document.body.appendChild(modal);
+        }
+
+        function attachHomeEvents() {
+            const form = document.getElementById('customer-form');
+            if (!form) return;
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                playSound('click');
+                const name = document.getElementById('cust-name').value.trim();
+                const phone = document.getElementById('cust-phone').value.trim();
+
+                const phoneRegex = /^0[689]\d{8}$/;
+                if (!phoneRegex.test(phone)) {
+                    showCustomAlert('เบอร์โทรไม่ถูกต้อง ❌', 'กรุณากรอกหมายเลขโทรศัพท์มือถือ 10 หลักให้ถูกต้อง<br>(ขึ้นต้นด้วย 06, 08 หรือ 09)');
+                    return;
+                }
+
+                let localDraws = customers[phone] ? customers[phone].drawsCount : 0;
+                let supaDraws = 0;
+                
+                if (supabaseClient) {
+                    try {
+                        let { data, error } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
+                        if (data) supaDraws = data.length;
+                    } catch (e) {}
+                }
+                
+                let finalDrawsCount = Math.max(localDraws, supaDraws);
+
+                if (finalDrawsCount >= 2) {
+                    let historyHTML = getCustomerHistoryHTML(phone);
+                    showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'หมายเลขโทรศัพท์นี้ใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว (รวมทุกสาขา)<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup ครับ!' + historyHTML);
+                    return;
+                }
+
+                customerData = { name, phone };
+                currentView = 'draw';
+                renderCurrentView();
+            });
+        }
+
+        function renderDrawHTML() {
+            const custRecord = customers[customerData.phone] || { drawsCount: 0 };
+            const remainingChances = 2 - custRecord.drawsCount;
+            const branchObj = BRANCHES.find(b => b.id === selectedBranch);
+
+            return `
+                <div class="w-full card-glass p-6 md:p-8 rounded-2xl glow-purple text-center relative">
+                    <div class="flex justify-between items-center mb-6 border-b border-purple-800/40 pb-4">
+                        <div class="text-left">
+                            <h3 class="font-bold text-orange-400 text-lg">${customerData.name}</h3>
+                            <p class="text-xs text-purple-300">เบอร์: ${customerData.phone} | สาขา: ${branchObj.name}</p>
+                        </div>
+                        <div class="bg-purple-900/60 px-4 py-2 rounded-xl border border-orange-500/40">
+                            <span class="text-xs text-purple-300">สิทธิ์คงเหลือ:</span>
+                            <span class="text-lg font-bold text-orange-400 ml-1">${remainingChances} ครั้ง</span>
+                        </div>
+                    </div>
+
+                    <div class="mb-8">
+                        <h2 class="text-2xl font-bold text-white mb-2">🎁 เลือกกล่องสุ่มนำโชค Halloween 🎃</h2>
+                        <p class="text-purple-300 text-sm">คลิกเลือกกล่องของขวัญด้านล่าง 1 กล่องเพื่อเปิดลุ้นรางวัลพิเศษ!</p>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+                        ${[1, 2, 3, 4, 5, 6].map(boxNum => `
+                            <div onclick="openBox(${boxNum})" class="card-glass p-6 rounded-2xl cursor-pointer hover:border-orange-500 hover:glow-orange transition-all transform hover:-translate-y-1 group">
+                                <div class="text-5xl mb-3 animate-pulse-slow group-hover:scale-110 transition-transform">🎁</div>
+                                <div class="text-sm font-bold text-orange-300">กล่องลึกลับ #${boxNum}</div>
+                                <div class="text-xs text-purple-400 mt-1">แตะเพื่อเปิดกล่อง</div>
+                            </div>
+                        `).join('')}
+                    </div>
+
+                    <button onclick="goToHome()" class="px-6 py-2 rounded-xl bg-purple-900/60 text-purple-300 hover:bg-purple-800 text-sm border border-purple-700">
+                        <i class="fa-solid fa-arrow-left mr-1"></i> เปลี่ยนข้อมูล / เปลี่ยนสาขา
+                    </button>
+                </div>
+            `;
+        }
+
+        async function openBox(boxNum) {
+            playSound('magic');
+            
+            let localDraws = customers[customerData.phone] ? customers[customerData.phone].drawsCount : 0;
+            let supaDraws = 0;
+            if (supabaseClient) {
+                try {
+                    let { data } = await supabaseClient.from('draw_records').select('*').eq('phone', customerData.phone);
+                    if (data) supaDraws = data.length;
+                } catch(e) {}
+            }
+
+            if (Math.max(localDraws, supaDraws) >= 2) {
+                let historyHTML = getCustomerHistoryHTML(customerData.phone);
+                showCustomAlert('ใช้สิทธิ์ครบแล้ว! 🚫', 'คุณใช้สิทธิ์สุ่มครบ 2 ครั้งแล้ว<br>ขอบคุณที่ร่วมสนุกกับ NCN Medgroup' + historyHTML, () => { goToHome(); });
+                return;
+            }
+
+            let availableRewards = rewards.filter(r => {
+                const inv = branchInventories[selectedBranch]?.[r.id];
+                return inv && inv.active && inv.stock > 0;
+            });
+
+            if (availableRewards.length === 0) {
+                showCustomAlert('ของรางวัลหมด! 📦', 'ขออภัยค่ะ ของรางวัลในสาขานี้หมดเกลี้ยงแล้ว!');
+                return;
+            }
+
+            let totalWeight = availableRewards.reduce((sum, r) => sum + (r.weight || 15), 0);
+            let randomWeight = Math.random() * totalWeight;
+            let currentSum = 0;
+            let wonReward = availableRewards[0];
+
+            for (let r of availableRewards) {
+                currentSum += (r.weight || 15);
+                if (randomWeight <= currentSum) {
+                    wonReward = r;
+                    break;
+                }
+            }
+
+            const magicModal = document.createElement('div');
+            magicModal.id = 'magic-modal';
+            magicModal.className = 'fixed inset-0 bg-black/90 backdrop-blur-md z-50 flex flex-col items-center justify-center p-6 text-center';
+            magicModal.innerHTML = `
+                <div class="text-7xl mb-4 animate-bounce">🧙‍♂️✨</div>
+                <h3 class="text-2xl font-bold text-orange-400 mb-2">พ่อมดน้อยกำลังร่ายคาถาเปิดกล่องสุ่ม...</h3>
+                <p class="text-purple-300 text-sm italic mb-6 animate-pulse">"ซิมมูซัม พรหมสิทธิ์ โชคลาภจงบังเกิด ณ บัดนี้!"</p>
+                <div class="w-16 h-16 border-4 border-orange-500 border-t-transparent rounded-full animate-spin"></div>
+            `;
+            document.body.appendChild(magicModal);
+
+            branchInventories[selectedBranch][wonReward.id].stock -= 1;
+            await saveRewardToSupabase(wonReward.id);
+
+            const branchObj = BRANCHES.find(b => b.id === selectedBranch);
+            const timeStr = new Date().toLocaleString('th-TH');
+
+            if (!customers[customerData.phone]) {
+                customers[customerData.phone] = { name: customerData.name, drawsCount: 0, history: [] };
+            }
+            customers[customerData.phone].drawsCount += 1;
+            customers[customerData.phone].history.push({
+                rewardName: wonReward.name,
+                branchName: branchObj.name,
+                time: timeStr
+            });
+            localStorage.setItem('ncn_customers', JSON.stringify(customers));
+
+            // [อัปเดตสำคัญ] เพิ่มการส่ง ID ให้ Supabase บันทึกข้อมูล
+            if (supabaseClient) {
+                try {
+                    let newDrawId = 'd_' + Date.now().toString() + Math.floor(Math.random() * 1000); // สร้าง Text ID ให้ฐานข้อมูลยอมรับ
+                    const { error } = await supabaseClient.from('draw_records').insert([{
+                        id: newDrawId,
+                        phone: customerData.phone,
+                        name: customerData.name,
+                        branch_id: selectedBranch,
+                        branch_name: branchObj.name,
+                        reward_name: wonReward.name,
+                        time: timeStr
+                    }]);
+                    if (error) console.error("Supabase Save Error:", error.message);
+                } catch (e) {}
+            }
+
+            setTimeout(() => {
+                document.getElementById('magic-modal')?.remove();
+                playSound('win');
+                showWinPopup(wonReward, customers[customerData.phone].drawsCount);
+            }, 2000);
+        }
+
+        function showWinPopup(reward, drawsCount) {
+            const branchObj = BRANCHES.find(b => b.id === selectedBranch);
+            const remaining = 2 - drawsCount;
+            const isImg = typeof reward.image === 'string' && reward.image.startsWith('data:image');
+            const custRecord = customers[customerData.phone] || { history: [] };
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/85 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 md:p-8 rounded-2xl max-w-md w-full text-center glow-orange relative">
+                    <div class="text-6xl mb-2 animate-bounce">🎉</div>
+                    <h3 class="text-2xl font-bold text-orange-400 mb-1">ยินดีด้วย! คุณได้รับรางวัล</h3>
+                    
+                    <div class="my-4 p-4 bg-purple-950/60 rounded-xl border border-orange-500/40">
+                        <div class="text-5xl mb-2 flex items-center justify-center h-20">
+                            ${isImg ? `<img src="${reward.image}" class="w-20 h-20 object-cover rounded-xl shadow-lg">` : reward.image}
+                        </div>
+                        <h4 class="text-xl font-bold text-white">${reward.name}</h4>
+                        <p class="text-xs text-purple-300 mt-1">สาขา: ${branchObj.name}</p>
+                    </div>
+
+                    <div class="mb-4 text-left bg-purple-900/40 p-3 rounded-xl border border-purple-700/50">
+                        <div class="text-xs font-bold text-orange-300 mb-2"><i class="fa-solid fa-clock-rotate-left mr-1"></i> ประวัติรางวัลที่คุณสุ่มได้ทั้งหมด:</div>
+                        <div class="space-y-1 max-h-28 overflow-y-auto pr-1">
+                            ${custRecord.history.map((h, index) => `
+                                <div class="text-xs text-purple-200 flex justify-between items-center bg-purple-950/60 p-2 rounded-lg">
+                                    <span><b>#${index + 1}</b> 🎁 ${h.rewardName}</span>
+                                    <span class="text-[10px] text-purple-400">${h.branchName}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <p class="text-xs text-purple-200 mb-6">สิทธิ์ที่ใช้ไป: <b class="text-orange-400">${drawsCount}/2 ครั้ง</b> (เหลือสิทธิ์: ${remaining} ครั้ง)</p>
+                    
+                    <div class="flex space-x-3">
+                        ${remaining > 0 ? `
+                            <button onclick="this.closest('.fixed').remove(); currentView='draw'; renderCurrentView();" class="flex-1 py-3 bg-orange-600 text-white rounded-xl font-bold text-sm hover:bg-orange-500">สุ่มอีกครั้ง ✨</button>
+                        ` : ''}
+                        <button onclick="this.closest('.fixed').remove(); goToHome();" class="flex-1 py-3 bg-purple-800 text-purple-200 rounded-xl font-bold text-sm hover:bg-purple-700">เสร็จสิ้น</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+            renderCurrentView();
+        }
+
+        function openAdminLogin() {
+            playSound('click');
+            currentView = 'admin_login';
+            renderCurrentView();
+        }
+
+        function renderAdminLoginHTML() {
+            return `
+                <div class="w-full max-w-md card-glass p-6 md:p-8 rounded-2xl glow-orange">
+                    <div class="text-center mb-6">
+                        <div class="w-16 h-16 mx-auto mb-2 rounded-2xl bg-orange-500/20 flex items-center justify-center text-3xl glow-orange">🔐</div>
+                        <h2 class="text-2xl font-bold text-orange-400">เข้าสู่ระบบ Admin / สาขา</h2>
+                        <p class="text-purple-300 text-xs mt-1">กรุณาเลือกสาขาและใส่รหัสผ่านประจำสาขา</p>
+                    </div>
+
+                    <form id="admin-login-form" class="space-y-4">
+                        <div>
+                            <label class="block text-sm font-semibold text-orange-300 mb-1">เลือกสาขา หรือ แอดมินส่วนกลาง</label>
+                            <select id="admin-branch-select" class="w-full px-4 py-3 rounded-xl bg-purple-950/80 border border-purple-700 text-white focus:outline-none focus:border-orange-500">
+                                <option value="central">👑 แอดมินส่วนกลาง (ดูภาพรวมทุกสาขา)</option>
+                                ${BRANCHES.map(b => `<option value="${b.id}">🏪 สาขา: ${b.name}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-semibold text-orange-300 mb-1">รหัสผ่านประจำสาขา (Passcode)</label>
+                            <input type="password" id="admin-passcode" required placeholder="กรอกรหัสผ่าน" class="w-full px-4 py-3 rounded-xl bg-purple-950/80 border border-purple-700 text-white focus:outline-none focus:border-orange-500">
+                        </div>
+                        <button type="submit" class="w-full py-3 rounded-xl bg-orange-600 text-white font-bold hover:bg-orange-500 glow-orange">เข้าสู่ระบบแอดมิน</button>
+                    </form>
+
+                    <div class="text-center mt-6">
+                        <button onclick="goToHome()" class="text-xs text-purple-400 hover:text-orange-300 underline">← กลับสู่หน้าหลักลูกค้า</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function attachAdminLoginEvents() {
+            const form = document.getElementById('admin-login-form');
+            if (!form) return;
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                playSound('click');
+                const branchChoice = document.getElementById('admin-branch-select').value;
+                const passcode = document.getElementById('admin-passcode').value.trim();
+
+                const passcodes = {
+                    'central': 'ncpm2014',
+                    'lansaka': 'LM2014',
+                    'nantachon1': 'NC2014',
+                    'thaiwatsadu': 'TP2014',
+                    'kokbok': 'KB2014',
+                    'khaokhao': 'KK2014',
+                    'thaphae': 'VT2014',
+                    'chanoknan': 'CH2014'
+                };
+
+                if (passcodes[branchChoice] && passcodes[branchChoice] === passcode) {
+                    currentAdminRole = branchChoice;
+                    currentView = 'admin_dashboard';
+                    adminTab = 'stock';
+                    renderCurrentView();
+                } else {
+                    showCustomAlert('รหัสผ่านไม่ถูกต้อง ❌', 'กรุณาตรวจสอบรหัสผ่านประจำสาขาใหม่อีกครั้ง');
+                }
+            });
+        }
+
+        function setAdminTab(tabName) {
+            playSound('click');
+            adminTab = tabName;
+            renderCurrentView();
+        }
+
+        function renderAdminDashboardHTML() {
+            const isCentral = currentAdminRole === 'central';
+            const roleName = isCentral ? 'แอดมินส่วนกลาง (ทุกสาขา)' : (BRANCHES.find(b => b.id === currentAdminRole)?.name || '');
+
+            let totalCustomers = Object.keys(customers).length;
+            let totalDraws = 0;
+            Object.values(customers).forEach(c => totalDraws += (c.drawsCount || 0));
+
+            return `
+                <div class="w-full card-glass p-6 rounded-2xl glow-purple">
+                    <div class="flex flex-col md:flex-row justify-between items-center mb-6 pb-4 border-b border-purple-800/40 gap-4">
+                        <div>
+                            <h2 class="text-2xl font-bold text-orange-400">📊 แผงควบคุมระบบ (Admin Dashboard)</h2>
+                            <p class="text-xs text-purple-300">สิทธิ์ผู้ใช้งาน: <span class="text-white font-bold">${roleName}</span></p>
+                        </div>
+                        <div class="flex space-x-2 flex-wrap gap-2">
+                            <button onclick="openAdminLogin()" class="px-4 py-2 bg-purple-800 text-purple-200 hover:bg-purple-700 rounded-xl text-xs font-bold border border-purple-600">
+                                <i class="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับไปหน้าเลือกสาขา
+                            </button>
+                            <button onclick="goToHome()" class="px-4 py-2 bg-purple-900/80 rounded-xl text-xs text-purple-200 hover:bg-purple-800">หน้าเว็บลูกค้า</button>
+                            <button onclick="currentAdminRole=null; openAdminLogin();" class="px-4 py-2 bg-red-600/80 rounded-xl text-xs text-white hover:bg-red-500">ออกจากระบบ</button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-orange-400 font-bold">${totalCustomers}</div>
+                            <div class="text-xs text-purple-300 mt-1">ลูกค้าที่เข้าร่วม (คน)</div>
+                        </div>
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-orange-400 font-bold">${totalDraws}</div>
+                            <div class="text-xs text-purple-300 mt-1">จำนวนครั้งที่สุ่ม</div>
+                        </div>
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-orange-400 font-bold">${rewards.length}</div>
+                            <div class="text-xs text-purple-300 mt-1">รายการของรางวัล</div>
+                        </div>
+                        <div class="bg-purple-950/60 p-4 rounded-xl border border-purple-800 text-center">
+                            <div class="text-2xl text-green-400 font-bold">Realtime</div>
+                            <div class="text-xs text-purple-300 mt-1">สถานะ Supabase Sync</div>
+                        </div>
+                    </div>
+
+                    <div class="flex space-x-2 mb-6 border-b border-purple-800/40 pb-4">
+                        <button onclick="setAdminTab('stock')" class="px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${adminTab === 'stock' ? 'bg-orange-600 text-white glow-orange' : 'bg-purple-950/60 text-purple-300 hover:bg-purple-900/60'}">
+                            <i class="fa-solid fa-boxes-stacked mr-2"></i> จัดการสต็อกของรางวัล
+                        </button>
+                        <button onclick="setAdminTab('customers')" class="px-5 py-2.5 rounded-xl font-bold text-sm transition-all ${adminTab === 'customers' ? 'bg-orange-600 text-white glow-orange' : 'bg-purple-950/60 text-purple-300 hover:bg-purple-900/60'}">
+                            <i class="fa-solid fa-users mr-2"></i> ประวัติลูกค้าและจัดการสิทธิ์ (${totalCustomers})
+                        </button>
+                    </div>
+
+                    ${adminTab === 'stock' ? `
+                        <div class="mb-8">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-lg font-bold text-orange-300"><i class="fa-solid fa-boxes-stacked mr-2"></i> จัดการของรางวัลและสต็อกแยกตามสาขา</h3>
+                                ${isCentral ? `<button onclick="addNewRewardModal()" class="px-3 py-1.5 bg-orange-600 text-white rounded-lg text-xs font-bold hover:bg-orange-500">+ เพิ่มของรางวัลใหม่</button>` : ''}
+                            </div>
+
+                            <div class="space-y-6">
+                                ${rewards.map(r => {
+                                    const targetBranches = isCentral ? BRANCHES : BRANCHES.filter(b => b.id === currentAdminRole);
+                                    const isImg = typeof r.image === 'string' && r.image.startsWith('data:image');
+                                    return `
+                                        <div class="card-glass p-5 rounded-xl border border-purple-700/60">
+                                            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 pb-3 border-b border-purple-800/40 gap-3">
+                                                <div class="flex items-center space-x-3">
+                                                    <div class="text-4xl bg-purple-900/60 p-2 rounded-xl flex items-center justify-center w-14 h-14">
+                                                        ${isImg ? `<img src="${r.image}" class="w-10 h-10 object-cover rounded-lg">` : r.image}
+                                                    </div>
+                                                    <div>
+                                                        <h4 class="font-bold text-white text-lg">${r.name}</h4>
+                                                        <p class="text-xs text-purple-300">ซิงก์ข้อมูลและรูปภาพขึ้นคลาวด์อัตโนมัติ</p>
+                                                    </div>
+                                                </div>
+                                                ${isCentral ? `
+                                                    <div class="flex space-x-2">
+                                                        <button onclick="editRewardModal('${r.id}')" class="px-3 py-1 bg-amber-600 text-white rounded-lg text-xs hover:bg-amber-500">✏️ แก้ไขชื่อ/รูป</button>
+                                                        <button onclick="deleteReward('${r.id}')" class="px-3 py-1 bg-red-600 text-white rounded-lg text-xs hover:bg-red-500">🗑️ ลบของรางวัล</button>
+                                                    </div>
+                                                ` : ''}
+                                            </div>
+
+                                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                                                ${targetBranches.map(b => {
+                                                    const inv = branchInventories[b.id]?.[r.id] || { stock: 15, active: true };
+                                                    return `
+                                                        <div id="card-stock-${b.id}-${r.id}" class="bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}">
+                                                            <div class="flex justify-between items-center mb-2">
+                                                                <span class="text-xs font-semibold text-orange-300 truncate">${b.name}</span>
+                                                                <button id="btn-active-${b.id}-${r.id}" onclick="toggleBranchReward('${b.id}', '${r.id}')" class="px-2 py-0.5 rounded text-[10px] ${inv.active ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}">
+                                                                    ${inv.active ? 'เปิดสุ่ม' : 'ปิดการสุ่ม'}
+                                                                </button>
+                                                            </div>
+                                                            <div class="text-sm font-bold text-white mb-2">คงเหลือ: <span id="stock-val-${b.id}-${r.id}" class="${inv.stock > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold'}">${inv.stock} ชิ้น</span></div>
+                                                            
+                                                            <div class="flex items-center space-x-1 mb-2">
+                                                                <button onclick="updateStock('${b.id}', '${r.id}', -1)" class="w-8 h-8 bg-red-900/60 rounded-lg text-xs hover:bg-red-800 font-bold">-1</button>
+                                                                <button onclick="updateStock('${b.id}', '${r.id}', 1)" class="w-8 h-8 bg-green-900/60 rounded-lg text-xs hover:bg-green-800 font-bold">+1</button>
+                                                                <button onclick="updateStock('${b.id}', '${r.id}', 10)" class="w-8 h-8 bg-purple-800 rounded-lg text-xs hover:bg-purple-700 font-bold">+10</button>
+                                                            </div>
+
+                                                            <button onclick="openStockModal('${b.id}', '${r.id}')" class="w-full py-2 bg-orange-600 text-white rounded-xl text-xs font-bold hover:bg-orange-500 shadow flex items-center justify-center space-x-1">
+                                                                <i class="fa-solid fa-pen-to-square"></i>
+                                                                <span>ระบุจำนวน</span>
+                                                            </button>
+                                                        </div>
+                                                    `;
+                                                }).join('')}
+                                            </div>
+                                        </div>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
+                    ` : `
+                        <div>
+                            <h3 class="text-lg font-bold text-orange-300 mb-4"><i class="fa-solid fa-users mr-2"></i> ประวัติลูกค้าและจัดการสิทธิ์ (สูงสุด 2 ครั้ง/เบอร์)</h3>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left text-sm text-purple-200">
+                                    <thead class="bg-purple-950 text-orange-300 uppercase text-xs border-b border-purple-800">
+                                        <tr>
+                                            <th class="p-3">เบอร์โทรศัพท์</th>
+                                            <th class="p-3">ชื่อลูกค้า</th>
+                                            <th class="p-3">สิทธิ์ที่ใช้ไป</th>
+                                            <th class="p-3">ประวัติรางวัลที่ได้รับ</th>
+                                            <th class="p-3 text-center">จัดการสิทธิ์</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-purple-900/50">
+                                        ${totalCustomers === 0 ? `
+                                            <tr><td colspan="5" class="p-4 text-center text-purple-400">ยังไม่มีข้อมูลประวัติการสุ่มของลูกค้า</td></tr>
+                                        ` : Object.entries(customers).map(([phone, data]) => `
+                                            <tr class="hover:bg-purple-900/20">
+                                                <td class="p-3 font-mono font-bold text-orange-300">${phone}</td>
+                                                <td class="p-3">${data.name || '-'}</td>
+                                                <td class="p-3"><span class="px-2 py-0.5 rounded bg-purple-900 text-xs">${data.drawsCount} / 2 ครั้ง</span></td>
+                                                <td class="p-3 text-xs">
+                                                    ${(data.history || []).map(h => `<div>🎁 ${h.rewardName} (${h.branchName}) <span class="text-[10px] text-purple-400">${h.time}</span></div>`).join('')}
+                                                </td>
+                                                <td class="p-3 text-center">
+                                                    <button onclick="resetCustomerRights('${phone}')" class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-500 mr-1">รีเซ็ตสิทธิ์ (0)</button>
+                                                    <button onclick="deleteCustomerRecord('${phone}')" class="px-3 py-1 bg-red-600 text-white rounded text-xs hover:bg-red-500">ลบข้อมูล</button>
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    `}
+                </div>
+            `;
+        }
+
+        function updateStockDOM(branchId, rewardId) {
+            const inv = branchInventories[branchId]?.[rewardId];
+            if (!inv) return;
+            const spanElem = document.getElementById(`stock-val-${branchId}-${rewardId}`);
+            const cardElem = document.getElementById(`card-stock-${branchId}-${rewardId}`);
+            if (spanElem) {
+                spanElem.textContent = inv.stock + ' ชิ้น';
+                spanElem.className = inv.stock > 0 ? 'text-green-400 font-bold' : 'text-red-400 font-bold';
+            }
+            if (cardElem) {
+                cardElem.className = `bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}`;
+            }
+        }
+
+        function updateActiveDOM(branchId, rewardId) {
+            const inv = branchInventories[branchId]?.[rewardId];
+            if (!inv) return;
+            const btn = document.getElementById(`btn-active-${branchId}-${rewardId}`);
+            const card = document.getElementById(`card-stock-${branchId}-${rewardId}`);
+            if (btn) {
+                btn.textContent = inv.active ? 'เปิดสุ่ม' : 'ปิดการสุ่ม';
+                btn.className = `px-2 py-0.5 rounded text-[10px] ${inv.active ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`;
+            }
+            if (card) {
+                card.className = `bg-purple-950/80 p-3 rounded-xl border ${inv.stock > 0 && inv.active ? 'border-purple-700' : 'border-red-500/50'}`;
+            }
+        }
+
+        function openStockModal(branchId, rewardId) {
+            playSound('click');
+            const inv = branchInventories[branchId][rewardId];
+            const branchObj = BRANCHES.find(b => b.id === branchId);
+            const reward = rewards.find(r => r.id === rewardId);
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 rounded-2xl max-w-sm w-full glow-orange text-center relative">
+                    <div class="text-4xl mb-2 animate-bounce">🎁✨</div>
+                    <h3 class="text-lg font-bold text-orange-400 mb-1">ระบุจำนวนสต็อก</h3>
+                    <p class="text-xs text-purple-300 mb-4">${reward.name} (${branchObj.name})</p>
+                    <input type="number" id="popup-stock-input" value="${inv.stock}" class="w-full px-4 py-3 rounded-xl bg-purple-950 border border-purple-700 text-white text-center text-xl font-bold mb-4 focus:outline-none focus:border-orange-500">
+                    <div class="flex space-x-2">
+                        <button id="popup-save-btn" class="flex-1 py-2.5 bg-orange-600 text-white font-bold rounded-xl text-sm hover:bg-orange-500">บันทึก</button>
+                        <button onclick="this.closest('.fixed').remove()" class="flex-1 py-2.5 bg-purple-900 text-purple-200 font-bold rounded-xl text-sm hover:bg-purple-800">ยกเลิก</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const input = modal.querySelector('#popup-stock-input');
+            input.focus();
+            input.select();
+
+            modal.querySelector('#popup-save-btn').addEventListener('click', async () => {
+                let val = parseInt(input.value);
+                if (isNaN(val)) val = 0;
+                inv.stock = Math.max(0, val);
+                updateStockDOM(branchId, rewardId);
+                modal.remove();
+                await saveRewardToSupabase(rewardId);
+            });
+        }
+
+        async function updateStock(branchId, rewardId, amount) {
+            playSound('click');
+            let inv = branchInventories[branchId][rewardId];
+            inv.stock = Math.max(0, inv.stock + amount);
+            updateStockDOM(branchId, rewardId);
+            await saveRewardToSupabase(rewardId);
+        }
+
+        async function toggleBranchReward(branchId, rewardId) {
+            playSound('click');
+            let inv = branchInventories[branchId][rewardId];
+            inv.active = !inv.active;
+            updateActiveDOM(branchId, rewardId);
+            await saveRewardToSupabase(rewardId);
+        }
+
+        function editRewardModal(rewardId) {
+            playSound('click');
+            let reward = rewards.find(r => r.id === rewardId);
+            if (!reward) return;
+
+            let tempImage = reward.image;
+            const isImg = typeof reward.image === 'string' && reward.image.startsWith('data:image');
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 rounded-2xl max-w-md w-full glow-orange">
+                    <h3 class="text-xl font-bold text-orange-400 mb-4"><i class="fa-solid fa-pen-to-square mr-2"></i> แก้ไขของรางวัล</h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-orange-300 mb-1">ชื่อของรางวัล</label>
+                            <input type="text" id="modal-reward-name" value="${reward.name}" class="w-full px-4 py-2 rounded-xl bg-purple-950 border border-purple-700 text-white text-sm focus:outline-none focus:border-orange-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-orange-300 mb-1">รูปภาพปัจจุบัน / เลือกรูปใหม่จากคอมพิวเตอร์</label>
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div id="modal-preview" class="w-16 h-16 bg-purple-900 rounded-xl flex items-center justify-center text-3xl overflow-hidden border border-orange-500/40">
+                                    ${isImg ? `<img src="${reward.image}" class="w-full h-full object-cover">` : reward.image}
+                                </div>
+                                <div class="flex-1">
+                                    <input type="file" id="modal-file-input" accept="image/*" class="w-full text-xs text-purple-300 file:mr-2 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-600 file:text-white hover:file:bg-orange-500 cursor-pointer">
+                                </div>
+                            </div>
+                            <input type="text" id="modal-emoji-input" value="${!isImg ? reward.image : ''}" placeholder="หรือใส่อีโมจิ เช่น 🎁" class="w-full px-3 py-2 rounded-xl bg-purple-950 border border-purple-700 text-white text-xs focus:outline-none focus:border-orange-500">
+                        </div>
+
+                        <div class="flex space-x-2 pt-2">
+                            <button id="modal-save-btn" class="flex-1 py-2.5 bg-orange-600 text-white font-bold rounded-xl text-sm hover:bg-orange-500">บันทึกและซิงก์</button>
+                            <button id="modal-cancel-btn" class="flex-1 py-2.5 bg-purple-900 text-purple-200 font-bold rounded-xl text-sm hover:bg-purple-800">ยกเลิก</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const fileInput = modal.querySelector('#modal-file-input');
+            const emojiInput = modal.querySelector('#modal-emoji-input');
+            const preview = modal.querySelector('#modal-preview');
+
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    compressImage(file, (compressedDataUrl) => {
+                        tempImage = compressedDataUrl;
+                        preview.innerHTML = `<img src="${tempImage}" class="w-full h-full object-cover">`;
+                        emojiInput.value = '';
+                    });
+                }
+            });
+
+            emojiInput.addEventListener('input', (e) => {
+                if (e.target.value.trim() !== '') {
+                    tempImage = e.target.value.trim();
+                    preview.innerHTML = tempImage;
+                    fileInput.value = '';
+                }
+            });
+
+            modal.querySelector('#modal-save-btn').addEventListener('click', async () => {
+                const newName = modal.querySelector('#modal-reward-name').value.trim();
+                if (!newName) {
+                    showCustomAlert('แจ้งเตือน', 'กรุณากรอกชื่อของรางวัล');
+                    return;
+                }
+                reward.name = newName;
+                reward.image = tempImage;
+                modal.remove();
+                renderCurrentView();
+                await saveRewardToSupabase(reward.id);
+            });
+
+            modal.querySelector('#modal-cancel-btn').addEventListener('click', () => {
+                modal.remove();
+            });
+        }
+
+        function addNewRewardModal() {
+            playSound('click');
+            let tempImage = '🎁';
+
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4';
+            modal.innerHTML = `
+                <div class="card-glass p-6 rounded-2xl max-w-md w-full glow-orange">
+                    <h3 class="text-xl font-bold text-orange-400 mb-4"><i class="fa-solid fa-plus-circle mr-2"></i> เพิ่มของรางวัลใหม่</h3>
+                    
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-xs font-semibold text-orange-300 mb-1">ชื่อของรางวัล</label>
+                            <input type="text" id="modal-reward-name" placeholder="เช่น กระเป๋าผ้าพรีเมียม" class="w-full px-4 py-2 rounded-xl bg-purple-950 border border-purple-700 text-white text-sm focus:outline-none focus:border-orange-500">
+                        </div>
+
+                        <div>
+                            <label class="block text-xs font-semibold text-orange-300 mb-1">อัปโหลดรูปภาพจากคอมพิวเตอร์ หรือใส่อีโมจิ</label>
+                            <div class="flex items-center space-x-3 mb-2">
+                                <div id="modal-preview" class="w-16 h-16 bg-purple-900 rounded-xl flex items-center justify-center text-3xl overflow-hidden border border-orange-500/40">🎁</div>
+                                <div class="flex-1">
+                                    <input type="file" id="modal-file-input" accept="image/*" class="w-full text-xs text-purple-300 file:mr-2 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-orange-600 file:text-white hover:file:bg-orange-500 cursor-pointer">
+                                </div>
+                            </div>
+                            <input type="text" id="modal-emoji-input" placeholder="หรือใส่อีโมจิ เช่น 🎁" class="w-full px-3 py-2 rounded-xl bg-purple-950 border border-purple-700 text-white text-xs focus:outline-none focus:border-orange-500">
+                        </div>
+
+                        <div class="flex space-x-2 pt-2">
+                            <button id="modal-save-btn" class="flex-1 py-2.5 bg-orange-600 text-white font-bold rounded-xl text-sm hover:bg-orange-500">เพิ่มของรางวัล</button>
+                            <button id="modal-cancel-btn" class="flex-1 py-2.5 bg-purple-900 text-purple-200 font-bold rounded-xl text-sm hover:bg-purple-800">ยกเลิก</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(modal);
+
+            const fileInput = modal.querySelector('#modal-file-input');
+            const emojiInput = modal.querySelector('#modal-emoji-input');
+            const preview = modal.querySelector('#modal-preview');
+
+            fileInput.addEventListener('change', (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    compressImage(file, (compressedDataUrl) => {
+                        tempImage = compressedDataUrl;
+                        preview.innerHTML = `<img src="${tempImage}" class="w-full h-full object-cover">`;
+                        emojiInput.value = '';
+                    });
+                }
+            });
+
+            emojiInput.addEventListener('input', (e) => {
+                if (e.target.value.trim() !== '') {
+                    tempImage = e.target.value.trim();
+                    preview.innerHTML = tempImage;
+                    fileInput.value = '';
+                }
+            });
+
+            modal.querySelector('#modal-save-btn').addEventListener('click', async () => {
+                const name = modal.querySelector('#modal-reward-name').value.trim();
+                if (!name) {
+                    showCustomAlert('แจ้งเตือน', 'กรุณากรอกชื่อของรางวัล');
+                    return;
+                }
+                let newId = 'r_' + Date.now();
+                let newReward = { id: newId, name, image: tempImage, weight: 15 };
+                
+                rewards.push(newReward);
+                BRANCHES.forEach(b => {
+                    if (!branchInventories[b.id]) branchInventories[b.id] = {};
+                    branchInventories[b.id][newId] = { stock: 15, active: true };
+                });
+
+                modal.remove();
+                renderCurrentView();
+                await saveRewardToSupabase(newId);
+            });
+
+            modal.querySelector('#modal-cancel-btn').addEventListener('click', () => {
+                modal.remove();
+            });
+        }
+
+        async function deleteReward(rewardId) {
+            if (confirm('⚠️ คุณแน่ใจหรือไม่ที่จะลบของรางวัลนี้ออกจากระบบ?')) {
+                playSound('click');
+                rewards = rewards.filter(r => r.id !== rewardId);
+                localStorage.setItem('ncn_rewards_cache', JSON.stringify(rewards));
+                renderCurrentView();
+                if (supabaseClient) {
+                    await supabaseClient.from('rewards').delete().eq('id', rewardId);
+                }
+            }
+        }
+
+        async function resetCustomerRights(phone) {
+            if (confirm(`ต้องการรีเซ็ตสิทธิ์ของเบอร์ ${phone} ให้กลับเป็น 0 (สิทธิ์เต็ม 2 ครั้ง) หรือไม่?`)) {
+                playSound('click');
+                delete customers[phone];
+                localStorage.setItem('ncn_customers', JSON.stringify(customers));
+                if (supabaseClient) {
+                    await supabaseClient.from('draw_records').delete().eq('phone', phone);
+                }
+                renderCurrentView();
+            }
+        }
+
+        async function deleteCustomerRecord(phone) {
+            if (confirm(`⚠️ ยืนยันการลบประวัติและสิทธิ์ทั้งหมดของเบอร์ ${phone}?`)) {
+                playSound('click');
+                delete customers[phone];
+                localStorage.setItem('ncn_customers', JSON.stringify(customers));
+                if (supabaseClient) {
+                    await supabaseClient.from('draw_records').delete().eq('phone', phone);
+                }
+                renderCurrentView();
+            }
+        }
+
+        renderCurrentView();
+        loadSupabaseData();
+    </script>
+</body>
+</html>
