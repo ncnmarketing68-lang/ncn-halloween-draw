@@ -126,7 +126,7 @@
                     <div class="text-xs text-purple-200 bg-purple-950/60 p-2.5 rounded-lg border border-purple-800/40">
                         <div class="font-bold text-white mb-1">🎁 ครั้งที่ ${index + 1}: ${h.rewardName}</div>
                         <div class="text-[10px] text-purple-300 flex items-center mb-0.5"><i class="fa-solid fa-location-dot w-4 text-center mr-1"></i> ${h.branchName}</div>
-                        <div class="text-[10px] text-orange-300 flex items-center"><i class="fa-solid fa-clock w-4 text-center mr-1"></i> ${h.time}</div>
+                        <div class="text-[10px] text-orange-300 flex items-center"><i class="fa-solid fa-clock w-4 text-center mr-1"></i> ${h.time || 'ไม่ระบุ'}</div>
                     </div>
                 `;
             });
@@ -283,13 +283,13 @@
                         if (!localCust[phone]) {
                             localCust[phone] = { name: r.name, drawsCount: 0, history: [] };
                         }
-                        let exists = localCust[phone].history.some(h => h.time === r.time && h.rewardName === r.reward_name);
+                        let exists = localCust[phone].history.some(h => h.rewardName === r.reward_name && h.branchName === r.branch_name);
                         if (!exists) {
                             localCust[phone].drawsCount += 1;
                             localCust[phone].history.push({
                                 rewardName: r.reward_name || 'ไม่ระบุ',
                                 branchName: r.branch_name,
-                                time: r.time || ''
+                                time: r.time || 'ไม่ระบุ'
                             });
                         }
                     });
@@ -503,7 +503,6 @@
                     return;
                 }
 
-                // เปลี่ยนปุ่มเป็นสถานะโหลด เพื่อดึงข้อมูลจากคลาวด์สดๆ
                 const btnSubmit = document.getElementById('btn-submit');
                 const originalText = btnSubmit.innerHTML;
                 btnSubmit.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-2"></i> กำลังตรวจสอบสิทธิ์จากส่วนกลาง...';
@@ -518,11 +517,10 @@
                         let { data, error } = await supabaseClient.from('draw_records').select('*').eq('phone', phone);
                         if (data) {
                             supaDraws = data.length;
-                            // ซิงก์ประวัติลงเครื่องลูกค้าด้วยเลยเผื่อลูกค้าเปลี่ยนเครื่อง
                             if (!customers[phone]) customers[phone] = { name: name, drawsCount: 0, history: [] };
                             customers[phone].drawsCount = supaDraws;
                             customers[phone].history = data.map(r => ({
-                                rewardName: r.reward_name, branchName: r.branch_name, time: r.time
+                                rewardName: r.reward_name, branchName: r.branch_name, time: r.time || 'ไม่ระบุ'
                             }));
                         }
                     } catch (e) {}
@@ -530,7 +528,6 @@
                 
                 let finalDrawsCount = Math.max(localDraws, supaDraws);
 
-                // คืนสถานะปุ่ม
                 btnSubmit.innerHTML = originalText;
                 btnSubmit.disabled = false;
                 btnSubmit.classList.remove('opacity-70', 'cursor-not-allowed');
@@ -594,7 +591,6 @@
         async function openBox(boxNum) {
             playSound('magic');
             
-            // โชว์แอนิเมชันโหลดก่อนดึงคลาวด์เพื่อความชัวร์ 100% ว่าไม่ได้สุ่มพร้อมกัน 2 เครื่อง
             const loader = document.getElementById(`box-loader-${boxNum}`);
             if (loader) loader.classList.remove('hidden');
             if (loader) loader.classList.add('flex');
@@ -668,20 +664,23 @@
             });
             localStorage.setItem('ncn_customers', JSON.stringify(customers));
 
-            // บันทึกขึ้นคลาวด์ พร้อมแจ้งเตือนถ้าเกิดข้อผิดพลาด
+            // [อัปเดตสำคัญ 3] จับคู่คอลัมน์ให้เป๊ะตามตาราง Supabase ของลูกค้า
             if (supabaseClient) {
                 try {
+                    let newDrawId = 'd_' + Date.now().toString() + Math.floor(Math.random() * 1000); // สร้างรหัส id อัตโนมัติ
+                    
                     const { error } = await supabaseClient.from('draw_records').insert([{
+                        id: newDrawId,
                         phone: customerData.phone,
                         name: customerData.name,
-                        branch_id: selectedBranch,
                         branch_name: branchObj.name,
                         reward_name: wonReward.name,
-                        time: timeStr
+                        reward_image: (typeof wonReward.image === 'string' ? wonReward.image : '')
                     }]);
                     
                     if (error) {
-                        alert("⚠️ ฐานข้อมูลปฏิเสธการรับข้อมูล (กรุณาปลดล็อค RLS ใน Supabase ตามคำแนะนำ)\nError: " + error.message);
+                        alert("⚠️ แจ้งเตือนจากฐานข้อมูล:\n" + error.message);
+                        console.error("Supabase Error:", error);
                     }
                 } catch (e) {
                     alert("⚠️ เกิดข้อผิดพลาดในการเชื่อมต่อ: " + e.message);
@@ -954,7 +953,7 @@
                                                 <td class="p-3">${data.name || '-'}</td>
                                                 <td class="p-3"><span class="px-2 py-0.5 rounded bg-purple-900 text-xs">${data.drawsCount} / 2 ครั้ง</span></td>
                                                 <td class="p-3 text-xs">
-                                                    ${(data.history || []).map(h => `<div>🎁 ${h.rewardName} (${h.branchName}) <span class="text-[10px] text-purple-400">${h.time}</span></div>`).join('')}
+                                                    ${(data.history || []).map(h => `<div>🎁 ${h.rewardName} (${h.branchName}) <span class="text-[10px] text-purple-400">${h.time || ''}</span></div>`).join('')}
                                                 </td>
                                                 <td class="p-3 text-center">
                                                     <button onclick="resetCustomerRights('${phone}')" class="px-3 py-1 bg-amber-600 text-white rounded text-xs hover:bg-amber-500 mr-1">รีเซ็ตสิทธิ์ (0)</button>
